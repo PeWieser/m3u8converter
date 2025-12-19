@@ -2,6 +2,7 @@ import { Play, Trash2, Music, Video, Loader2, AlertCircle, CheckCircle } from 'l
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import type { ConversionJob } from '@/types/converter';
 import { ProgressBar } from './ProgressBar';
 import { MetadataEditor } from './MetadataEditor';
@@ -13,6 +14,10 @@ interface ConversionQueueItemProps {
   onRemove: () => void;
   onMetadataChange: (metadata: Partial<ConversionJob['metadata']>) => void;
   onAudioOnlyChange: (audioOnly: boolean) => void;
+  viewMode?: 'list' | 'grid';
+  isSelected?: boolean;
+  onSelectionChange?: () => void;
+  showCheckbox?: boolean;
 }
 
 export function ConversionQueueItem({
@@ -21,6 +26,10 @@ export function ConversionQueueItem({
   onRemove,
   onMetadataChange,
   onAudioOnlyChange,
+  viewMode = 'list',
+  isSelected = false,
+  onSelectionChange,
+  showCheckbox = false,
 }: ConversionQueueItemProps) {
   const isProcessing = ['parsing', 'downloading', 'converting'].includes(job.status);
   const isCompleted = job.status === 'completed';
@@ -28,10 +37,17 @@ export function ConversionQueueItem({
   const isPending = job.status === 'pending';
 
   return (
-    <div className="glass-hover rounded-xl overflow-hidden">
+    <div className={`glass-hover rounded-xl overflow-hidden ${viewMode === 'grid' ? 'h-full' : ''}`}>
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-border/30">
         <div className="flex items-center gap-3 min-w-0">
+          {showCheckbox && (
+            <Checkbox
+              checked={isSelected}
+              onCheckedChange={onSelectionChange}
+              className="flex-shrink-0"
+            />
+          )}
           <div className={`
             flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center
             ${isCompleted ? 'bg-green-500/20' : isError ? 'bg-destructive/20' : 'bg-secondary/50'}
@@ -89,10 +105,12 @@ export function ConversionQueueItem({
               </div>
             </div>
             
-            <MetadataEditor
-              metadata={job.metadata}
-              onChange={onMetadataChange}
-            />
+            {viewMode === 'list' && (
+              <MetadataEditor
+                metadata={job.metadata}
+                onChange={onMetadataChange}
+              />
+            )}
             
             <Button
               onClick={onStart}
