@@ -1,8 +1,8 @@
 import { useCallback } from 'react';
-import { Upload, Link } from 'lucide-react';
+import { Upload, Link, Files } from 'lucide-react';
 
 interface FileDropzoneProps {
-  onFileDrop: (file: File) => void;
+  onFileDrop: (files: File[]) => void;
   onUrlSubmit: (url: string) => void;
   isDragging: boolean;
   setIsDragging: (dragging: boolean) => void;
@@ -24,19 +24,19 @@ export function FileDropzone({ onFileDrop, onUrlSubmit, isDragging, setIsDraggin
     setIsDragging(false);
     
     const files = Array.from(e.dataTransfer.files);
-    const m3u8File = files.find(f => 
+    const m3u8Files = files.filter(f => 
       f.name.endsWith('.m3u8') || f.name.endsWith('.m3u')
     );
     
-    if (m3u8File) {
-      onFileDrop(m3u8File);
+    if (m3u8Files.length > 0) {
+      onFileDrop(m3u8Files);
     }
   }, [onFileDrop, setIsDragging]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      onFileDrop(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      onFileDrop(files);
     }
     e.target.value = '';
   }, [onFileDrop]);
@@ -63,23 +63,24 @@ export function FileDropzone({ onFileDrop, onUrlSubmit, isDragging, setIsDraggin
         </div>
         
         <h3 className="mb-2 text-lg font-semibold text-foreground">
-          Drop your M3U8 file here
+          Drop your M3U8 files here
         </h3>
         <p className="mb-4 text-sm text-muted-foreground">
-          or click to browse files
+          or click to browse files (multiple selection supported)
         </p>
         
         <input
           type="file"
           accept=".m3u8,.m3u"
+          multiple
           onChange={handleFileSelect}
           className="absolute inset-0 cursor-pointer opacity-0"
         />
         
         <div className="mt-4 flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1">
-            <Link className="h-3 w-3" />
-            Supports .m3u8 and .m3u files
+            <Files className="h-3 w-3" />
+            Supports multiple .m3u8 and .m3u files
           </span>
         </div>
       </div>
