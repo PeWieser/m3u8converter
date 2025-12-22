@@ -6,6 +6,13 @@ import { parseM3U8, getBaseUrl } from '@/lib/m3u8-parser';
 
 const FFMPEG_CORE_URL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
 
+// Number of concurrent download threads - optimized for speed
+const CONCURRENT_DOWNLOADS = 16;
+
+// Retry configuration for failed downloads
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 500;
+
 export function useFFmpeg() {
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -39,7 +46,6 @@ export function useFFmpeg() {
 
   const fetchM3U8Content = async (source: string, sourceType: 'file' | 'url'): Promise<{ content: string; baseUrl?: string }> => {
     if (sourceType === 'file') {
-      // source is already the content for local files
       return { content: source };
     }
     
@@ -51,6 +57,38 @@ export function useFFmpeg() {
       content: await response.text(), 
       baseUrl: getBaseUrl(source) 
     };
+  };
+
+  // Optimized fetch with retries and connection reuse
+  const fetchWithRetry = async (url: string, retries = MAX_RETRIES): Promise<ArrayBuffer> => {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await fetch(url, {
+          // Keep-alive is enabled by default in modern browsers
+          // This helps with connection pooling
+        });
+        
+        if (response.status === 429) {
+          // Rate limited - back off exponentially
+          const backoffTime = Math.pow(2, attempt) * 1000;
+          await new Promise(resolve => setTimeout(resolve, backoffTime));
+          continue;
+        }
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
+        return await response.arrayBuffer();
+      } catch (error) {
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * (attempt + 1)));
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new Error('Max retries exceeded');
   };
 
   const convert = useCallback(async (
@@ -90,55 +128,93 @@ export function useFFmpeg() {
       const segments = playlist.segments;
       addLog(`Found ${segments.length} segments (${Math.round(playlist.totalDuration || 0)}s)`);
       
-      // Estimate file size (rough: 500KB per second for video, 128kbps for audio)
+      // Estimate file size
       const estimatedSize = job.audioOnly 
-        ? (playlist.totalDuration || 0) * 16 * 1024 // ~128kbps
-        : (playlist.totalDuration || 0) * 500 * 1024; // ~4Mbps
+        ? (playlist.totalDuration || 0) * 16 * 1024
+        : (playlist.totalDuration || 0) * 500 * 1024;
       onEstimatedSize(estimatedSize);
 
-      // Download segments with parallel threads
-      const CONCURRENT_DOWNLOADS = 6; // Number of parallel download threads
-      addLog(`Downloading segments (${CONCURRENT_DOWNLOADS} parallel threads)...`);
-      const segmentFiles: string[] = new Array(segments.length).fill('');
-      let completedDownloads = 0;
+      // Download segments with high-speed parallel threads
+      addLog(`Downloading segments (${CONCURRENT_DOWNLOADS} parallel connections)...`);
       
+      // RAM buffer for all segments - avoid disk I/O
+      const segmentBuffers: Map<number, Uint8Array> = new Map();
+      let completedDownloads = 0;
+      let failedDownloads = 0;
+      const startTime = Date.now();
+      
+      // Create a semaphore for controlling concurrency
       const downloadSegment = async (index: number): Promise<void> => {
         const segment = segments[index];
-        const filename = `segment_${index.toString().padStart(4, '0')}.ts`;
         
         try {
-          const segmentData = await fetchFile(segment.uri);
-          await ffmpeg.writeFile(filename, segmentData);
-          segmentFiles[index] = filename;
+          const arrayBuffer = await fetchWithRetry(segment.uri);
+          segmentBuffers.set(index, new Uint8Array(arrayBuffer));
         } catch (error) {
-          addLog(`Warning: Failed to download segment ${index}, skipping...`);
-          segmentFiles[index] = '';
+          console.warn(`Failed to download segment ${index}:`, error);
+          failedDownloads++;
         }
         
         completedDownloads++;
         const downloadProgress = (completedDownloads / segments.length) * 50;
         onProgress(downloadProgress, logs);
         
-        if (completedDownloads % 10 === 0 || completedDownloads === segments.length) {
-          addLog(`Downloaded ${completedDownloads}/${segments.length} segments`);
+        // Update log every 20 segments or at completion
+        if (completedDownloads % 20 === 0 || completedDownloads === segments.length) {
+          const elapsed = (Date.now() - startTime) / 1000;
+          const speed = completedDownloads / elapsed;
+          addLog(`Downloaded ${completedDownloads}/${segments.length} segments (${speed.toFixed(1)} seg/s)`);
         }
       };
       
-      // Process segments in batches for parallel downloading
-      for (let i = 0; i < segments.length; i += CONCURRENT_DOWNLOADS) {
-        const batch = segments.slice(i, i + CONCURRENT_DOWNLOADS);
-        const batchPromises = batch.map((_, batchIndex) => 
-          downloadSegment(i + batchIndex)
-        );
-        await Promise.all(batchPromises);
-      }
+      // Process segments in parallel batches for maximum throughput
+      const batchDownload = async () => {
+        const queue: Promise<void>[] = [];
+        let nextIndex = 0;
+        
+        const processNext = async (): Promise<void> => {
+          if (nextIndex >= segments.length) return;
+          
+          const currentIndex = nextIndex++;
+          await downloadSegment(currentIndex);
+          await processNext();
+        };
+        
+        // Start CONCURRENT_DOWNLOADS parallel workers
+        for (let i = 0; i < Math.min(CONCURRENT_DOWNLOADS, segments.length); i++) {
+          queue.push(processNext());
+        }
+        
+        await Promise.all(queue);
+      };
       
-      // Filter out failed downloads while maintaining order
-      const validSegmentFiles = segmentFiles.filter(f => f !== '');
-
-      if (validSegmentFiles.length === 0) {
+      await batchDownload();
+      
+      const downloadedCount = segmentBuffers.size;
+      
+      if (downloadedCount === 0) {
         throw new Error('No segments could be downloaded');
       }
+
+      if (failedDownloads > 0) {
+        addLog(`Warning: ${failedDownloads} segments failed, continuing with ${downloadedCount} segments`);
+      }
+
+      // Write segments to FFmpeg filesystem in order
+      addLog('Preparing segments for conversion...');
+      const validSegmentFiles: string[] = [];
+      
+      for (let i = 0; i < segments.length; i++) {
+        const buffer = segmentBuffers.get(i);
+        if (buffer) {
+          const filename = `segment_${i.toString().padStart(4, '0')}.ts`;
+          await ffmpeg.writeFile(filename, buffer);
+          validSegmentFiles.push(filename);
+        }
+      }
+      
+      // Clear RAM buffer
+      segmentBuffers.clear();
 
       // Create concat file
       const concatContent = validSegmentFiles.map(f => `file '${f}'`).join('\n');
@@ -170,18 +246,17 @@ export function useFFmpeg() {
       try { await ffmpeg.deleteFile(outputFile); } catch {}
 
       const mimeType = job.audioOnly ? 'audio/mp3' : 'video/mp4';
-      // Create a proper ArrayBuffer from the data
       let arrayBuffer: ArrayBuffer;
       if (typeof data === 'string') {
         arrayBuffer = new TextEncoder().encode(data).buffer as ArrayBuffer;
       } else {
-        // Create a new ArrayBuffer copy to avoid SharedArrayBuffer issues
         arrayBuffer = new ArrayBuffer(data.byteLength);
         new Uint8Array(arrayBuffer).set(data);
       }
       const blob = new Blob([arrayBuffer], { type: mimeType });
       
-      addLog(`Conversion complete! Size: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
+      const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+      addLog(`Conversion complete! Size: ${(blob.size / 1024 / 1024).toFixed(2)} MB in ${totalTime}s`);
       onProgress(100, logs);
       
       return blob;

@@ -1,0 +1,153 @@
+import { useState, useCallback, useRef } from 'react';
+
+const TMDB_API_KEY = '7e8d48460950111f90be1d1ee5c83e34';
+const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
+const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
+
+export interface TmdbResult {
+  id: number;
+  title: string;
+  year?: string;
+  type: 'movie' | 'tv';
+  poster?: string;
+  overview?: string;
+}
+
+export interface TmdbDetails {
+  id: number;
+  title: string;
+  originalTitle?: string;
+  year?: string;
+  poster?: string;
+  backdrop?: string;
+  overview?: string;
+  genres?: string[];
+  director?: string;
+  creators?: string[];
+  runtime?: number;
+  rating?: number;
+  type: 'movie' | 'tv';
+}
+
+export function useTmdbSearch() {
+  const [results, setResults] = useState<TmdbResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  const search = useCallback(async (query: string) => {
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
+    if (!query || query.length < 2) {
+      setResults([]);
+      return;
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(
+          `${TMDB_BASE_URL}/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&language=de-DE&include_adult=false`
+        );
+        
+        if (!response.ok) {
+          throw new Error('TMDB API request failed');
+        }
+        
+        const data = await response.json();
+        
+        // Filter for movies and TV shows only
+        const items = (data.results || [])
+          .filter((item: any) => item.media_type === 'movie' || item.media_type === 'tv')
+          .slice(0, 8);
+        
+        const mappedResults: TmdbResult[] = items.map((item: any) => ({
+          id: item.id,
+          title: item.title || item.name || '',
+          year: (item.release_date || item.first_air_date || '').split('-')[0],
+          type: item.media_type as 'movie' | 'tv',
+          poster: item.poster_path 
+            ? `${TMDB_IMAGE_BASE}/w92${item.poster_path}` 
+            : undefined,
+          overview: item.overview,
+        }));
+        
+        setResults(mappedResults);
+      } catch (error) {
+        console.error('TMDB search error:', error);
+        setResults([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
+  }, []);
+
+  const clearResults = useCallback(() => {
+    setResults([]);
+  }, []);
+
+  const fetchDetails = useCallback(async (id: number, type: 'movie' | 'tv'): Promise<TmdbDetails | null> => {
+    try {
+      const endpoint = type === 'movie' ? 'movie' : 'tv';
+      const creditsEndpoint = type === 'movie' ? 'credits' : 'credits';
+      
+      // Fetch main details and credits in parallel
+      const [detailsRes, creditsRes] = await Promise.all([
+        fetch(`${TMDB_BASE_URL}/${endpoint}/${id}?api_key=${TMDB_API_KEY}&language=de-DE`),
+        fetch(`${TMDB_BASE_URL}/${endpoint}/${id}/${creditsEndpoint}?api_key=${TMDB_API_KEY}`)
+      ]);
+      
+      if (!detailsRes.ok) {
+        throw new Error('TMDB API request failed');
+      }
+      
+      const details = await detailsRes.json();
+      const credits = creditsRes.ok ? await creditsRes.json() : null;
+      
+      // Extract director or creators
+      let director: string | undefined;
+      let creators: string[] | undefined;
+      
+      if (credits) {
+        if (type === 'movie') {
+          const directorEntry = credits.crew?.find((c: any) => c.job === 'Director');
+          director = directorEntry?.name;
+        } else {
+          creators = details.created_by?.map((c: any) => c.name) || [];
+        }
+      }
+      
+      return {
+        id: details.id,
+        title: details.title || details.name || '',
+        originalTitle: details.original_title || details.original_name,
+        year: (details.release_date || details.first_air_date || '').split('-')[0],
+        poster: details.poster_path 
+          ? `${TMDB_IMAGE_BASE}/w500${details.poster_path}` 
+          : undefined,
+        backdrop: details.backdrop_path 
+          ? `${TMDB_IMAGE_BASE}/w1280${details.backdrop_path}` 
+          : undefined,
+        overview: details.overview,
+        genres: details.genres?.map((g: any) => g.name) || [],
+        director,
+        creators,
+        runtime: details.runtime || details.episode_run_time?.[0],
+        rating: details.vote_average,
+        type,
+      };
+    } catch (error) {
+      console.error('TMDB details error:', error);
+      return null;
+    }
+  }, []);
+
+  return {
+    results,
+    loading,
+    search,
+    clearResults,
+    fetchDetails,
+  };
+}
