@@ -2,20 +2,36 @@ import { useState, useEffect, useRef } from 'react';
 import { FileText, User, Image, ChevronDown, ChevronUp, Loader2, Film, Tv } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { ConversionMetadata } from '@/types/converter';
-import { useTmdbSearch, type TmdbResult } from '@/hooks/useTmdbSearch';
+import { useTmdbSearch, type TmdbResult, type TmdbDetails, type TmdbSeason, type TmdbEpisode } from '@/hooks/useTmdbSearch';
 
 interface MetadataEditorProps {
   metadata: ConversionMetadata;
   onChange: (metadata: Partial<ConversionMetadata>) => void;
   disabled?: boolean;
   defaultExpanded?: boolean;
+  onTmdbSelect?: (tmdbId: number, type: 'movie' | 'tv') => void;
+  onSeasonEpisodeChange?: (season: number, episode: number) => void;
 }
 
-export function MetadataEditor({ metadata, onChange, disabled = false, defaultExpanded = false }: MetadataEditorProps) {
+export function MetadataEditor({ 
+  metadata, 
+  onChange, 
+  disabled = false, 
+  defaultExpanded = false,
+  onTmdbSelect,
+  onSeasonEpisodeChange,
+}: MetadataEditorProps) {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const [showDropdown, setShowDropdown] = useState(false);
-  const { results, loading, search, clearResults, fetchDetails } = useTmdbSearch();
+  const [selectedTmdb, setSelectedTmdb] = useState<TmdbDetails | null>(null);
+  const [seasons, setSeasons] = useState<TmdbSeason[]>([]);
+  const [episodes, setEpisodes] = useState<TmdbEpisode[]>([]);
+  const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  const [selectedEpisode, setSelectedEpisode] = useState<number | null>(null);
+  const [loadingEpisodes, setLoadingEpisodes] = useState(false);
+  const { results, loading, search, clearResults, fetchDetails, fetchSeasonEpisodes } = useTmdbSearch();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,16 +61,58 @@ export function MetadataEditor({ metadata, onChange, disabled = false, defaultEx
     const details = await fetchDetails(result.id, result.type);
     
     if (details) {
+      setSelectedTmdb(details);
+      
       onChange({
         title: details.title,
         author: details.director || details.creators?.join(', ') || '',
         thumbnail: details.poster || '',
       });
+
+      onTmdbSelect?.(details.id, details.type);
+
+      // If it's a TV show, load seasons
+      if (details.type === 'tv' && details.seasons) {
+        setSeasons(details.seasons);
+        setSelectedSeason(null);
+        setSelectedEpisode(null);
+        setEpisodes([]);
+      } else {
+        setSeasons([]);
+        setEpisodes([]);
+      }
     } else {
       onChange({
         title: result.title,
         thumbnail: result.poster || '',
       });
+    }
+  };
+
+  const handleSeasonChange = async (seasonNumber: string) => {
+    const season = parseInt(seasonNumber, 10);
+    setSelectedSeason(season);
+    setSelectedEpisode(null);
+    setEpisodes([]);
+    
+    if (selectedTmdb && selectedTmdb.type === 'tv') {
+      setLoadingEpisodes(true);
+      const eps = await fetchSeasonEpisodes(selectedTmdb.id, season);
+      setEpisodes(eps);
+      setLoadingEpisodes(false);
+    }
+  };
+
+  const handleEpisodeChange = (episodeNumber: string) => {
+    const episode = parseInt(episodeNumber, 10);
+    setSelectedEpisode(episode);
+    
+    const ep = episodes.find(e => e.episodeNumber === episode);
+    if (ep && selectedSeason !== null) {
+      // Update title to include episode info
+      const episodeTitle = `${selectedTmdb?.title} - S${String(selectedSeason).padStart(2, '0')}E${String(episode).padStart(2, '0')} - ${ep.name}`;
+      onChange({ title: episodeTitle });
+      onSeasonEpisodeChange?.(selectedSeason, episode);
     }
   };
 
@@ -143,6 +201,54 @@ export function MetadataEditor({ metadata, onChange, disabled = false, defaultEx
               </div>
             )}
           </div>
+
+          {/* Season/Episode Selection for TV Shows */}
+          {seasons.length > 0 && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Tv className="h-3 w-3" />
+                  Staffel
+                </Label>
+                <Select value={selectedSeason?.toString() || ''} onValueChange={handleSeasonChange}>
+                  <SelectTrigger className="bg-secondary/50 border-border/50">
+                    <SelectValue placeholder="Staffel wählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {seasons.map((season) => (
+                      <SelectItem key={season.seasonNumber} value={season.seasonNumber.toString()}>
+                        {season.name} ({season.episodeCount} Episoden)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Film className="h-3 w-3" />
+                  Episode
+                  {loadingEpisodes && <Loader2 className="h-3 w-3 animate-spin" />}
+                </Label>
+                <Select 
+                  value={selectedEpisode?.toString() || ''} 
+                  onValueChange={handleEpisodeChange}
+                  disabled={!selectedSeason || loadingEpisodes}
+                >
+                  <SelectTrigger className="bg-secondary/50 border-border/50">
+                    <SelectValue placeholder="Episode wählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {episodes.map((episode) => (
+                      <SelectItem key={episode.episodeNumber} value={episode.episodeNumber.toString()}>
+                        E{String(episode.episodeNumber).padStart(2, '0')}: {episode.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
           
           <div className="space-y-2">
             <Label htmlFor="author" className="flex items-center gap-2 text-xs text-muted-foreground">
