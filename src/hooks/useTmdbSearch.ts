@@ -27,6 +27,24 @@ export interface TmdbDetails {
   runtime?: number;
   rating?: number;
   type: 'movie' | 'tv';
+  numberOfSeasons?: number;
+  seasons?: TmdbSeason[];
+}
+
+export interface TmdbSeason {
+  seasonNumber: number;
+  name: string;
+  episodeCount: number;
+  airDate?: string;
+  poster?: string;
+}
+
+export interface TmdbEpisode {
+  episodeNumber: number;
+  name: string;
+  overview?: string;
+  airDate?: string;
+  still?: string;
 }
 
 export function useTmdbSearch() {
@@ -117,6 +135,20 @@ export function useTmdbSearch() {
           creators = details.created_by?.map((c: any) => c.name) || [];
         }
       }
+
+      // Extract seasons for TV shows
+      let seasons: TmdbSeason[] | undefined;
+      if (type === 'tv' && details.seasons) {
+        seasons = details.seasons
+          .filter((s: any) => s.season_number > 0) // Exclude specials (season 0)
+          .map((s: any) => ({
+            seasonNumber: s.season_number,
+            name: s.name,
+            episodeCount: s.episode_count,
+            airDate: s.air_date,
+            poster: s.poster_path ? `${TMDB_IMAGE_BASE}/w185${s.poster_path}` : undefined,
+          }));
+      }
       
       return {
         id: details.id,
@@ -136,10 +168,37 @@ export function useTmdbSearch() {
         runtime: details.runtime || details.episode_run_time?.[0],
         rating: details.vote_average,
         type,
+        numberOfSeasons: details.number_of_seasons,
+        seasons,
       };
     } catch (error) {
       console.error('TMDB details error:', error);
       return null;
+    }
+  }, []);
+
+  const fetchSeasonEpisodes = useCallback(async (tvId: number, seasonNumber: number): Promise<TmdbEpisode[]> => {
+    try {
+      const response = await fetch(
+        `${TMDB_BASE_URL}/tv/${tvId}/season/${seasonNumber}?api_key=${TMDB_API_KEY}&language=de-DE`
+      );
+      
+      if (!response.ok) {
+        throw new Error('TMDB API request failed');
+      }
+      
+      const data = await response.json();
+      
+      return (data.episodes || []).map((ep: any) => ({
+        episodeNumber: ep.episode_number,
+        name: ep.name,
+        overview: ep.overview,
+        airDate: ep.air_date,
+        still: ep.still_path ? `${TMDB_IMAGE_BASE}/w300${ep.still_path}` : undefined,
+      }));
+    } catch (error) {
+      console.error('TMDB episodes error:', error);
+      return [];
     }
   }, []);
 
@@ -149,5 +208,6 @@ export function useTmdbSearch() {
     search,
     clearResults,
     fetchDetails,
+    fetchSeasonEpisodes,
   };
 }

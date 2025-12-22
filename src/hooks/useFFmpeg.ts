@@ -94,7 +94,9 @@ export function useFFmpeg() {
   const convert = useCallback(async (
     job: ConversionJob,
     onProgress: (progress: number, logs: string[]) => void,
-    onEstimatedSize: (size: number) => void
+    onEstimatedSize: (size: number) => void,
+    onDownloadStats: (stats: { speed: number; remainingTime: number }) => void,
+    onVideoQuality: (quality: string) => void
   ): Promise<Blob> => {
     if (!ffmpegRef.current) {
       throw new Error('FFmpeg not loaded');
@@ -113,12 +115,29 @@ export function useFFmpeg() {
       const { content, baseUrl } = await fetchM3U8Content(job.source, job.sourceType);
       let playlist: M3U8Playlist = await parseM3U8(content, baseUrl);
       
-      // If master playlist and variant selected, fetch the media playlist
-      if (playlist.type === 'master' && job.selectedVariant) {
-        addLog(`Fetching ${job.selectedVariant.name} quality stream...`);
-        const variantResponse = await fetch(job.selectedVariant.uri);
+      // If master playlist, extract video quality info and select variant
+      if (playlist.type === 'master' && playlist.variants && playlist.variants.length > 0) {
+        // Report available qualities
+        const qualities = playlist.variants
+          .map(v => v.resolution ? `${v.resolution.height}p` : `${Math.round(v.bandwidth / 1000)}kbps`)
+          .join(', ');
+        addLog(`Available qualities: ${qualities}`);
+        
+        // Use selected variant or pick best quality
+        const selectedVariant = job.selectedVariant || playlist.variants[0];
+        const qualityLabel = selectedVariant.resolution 
+          ? `${selectedVariant.resolution.width}x${selectedVariant.resolution.height} (${Math.round(selectedVariant.bandwidth / 1000)}kbps)`
+          : `${Math.round(selectedVariant.bandwidth / 1000)}kbps`;
+        
+        onVideoQuality(qualityLabel);
+        addLog(`Selected quality: ${qualityLabel}`);
+        
+        const variantResponse = await fetch(selectedVariant.uri);
         const variantContent = await variantResponse.text();
-        playlist = await parseM3U8(variantContent, getBaseUrl(job.selectedVariant.uri));
+        playlist = await parseM3U8(variantContent, getBaseUrl(selectedVariant.uri));
+      } else if (playlist.type === 'media') {
+        // Single quality stream - try to estimate from bitrate
+        onVideoQuality('Single quality stream');
       }
 
       if (playlist.type !== 'media' || !playlist.segments) {
@@ -141,7 +160,10 @@ export function useFFmpeg() {
       const segmentBuffers: Map<number, Uint8Array> = new Map();
       let completedDownloads = 0;
       let failedDownloads = 0;
+      let downloadedBytes = 0;
       const startTime = Date.now();
+      let lastSpeedUpdate = Date.now();
+      let bytesAtLastUpdate = 0;
       
       // Create a semaphore for controlling concurrency
       const downloadSegment = async (index: number): Promise<void> => {
@@ -149,7 +171,9 @@ export function useFFmpeg() {
         
         try {
           const arrayBuffer = await fetchWithRetry(segment.uri);
-          segmentBuffers.set(index, new Uint8Array(arrayBuffer));
+          const data = new Uint8Array(arrayBuffer);
+          segmentBuffers.set(index, data);
+          downloadedBytes += data.byteLength;
         } catch (error) {
           console.warn(`Failed to download segment ${index}:`, error);
           failedDownloads++;
@@ -159,11 +183,30 @@ export function useFFmpeg() {
         const downloadProgress = (completedDownloads / segments.length) * 50;
         onProgress(downloadProgress, logs);
         
+        // Calculate and report download speed every 500ms
+        const now = Date.now();
+        if (now - lastSpeedUpdate >= 500 || completedDownloads === segments.length) {
+          const timeDelta = (now - lastSpeedUpdate) / 1000;
+          const bytesDelta = downloadedBytes - bytesAtLastUpdate;
+          const currentSpeed = timeDelta > 0 ? bytesDelta / timeDelta : 0;
+          
+          // Estimate remaining time
+          const remainingSegments = segments.length - completedDownloads;
+          const avgBytesPerSegment = completedDownloads > 0 ? downloadedBytes / completedDownloads : 0;
+          const remainingBytes = remainingSegments * avgBytesPerSegment;
+          const remainingTime = currentSpeed > 0 ? remainingBytes / currentSpeed : 0;
+          
+          onDownloadStats({ speed: currentSpeed, remainingTime });
+          
+          lastSpeedUpdate = now;
+          bytesAtLastUpdate = downloadedBytes;
+        }
+        
         // Update log every 20 segments or at completion
         if (completedDownloads % 20 === 0 || completedDownloads === segments.length) {
           const elapsed = (Date.now() - startTime) / 1000;
-          const speed = completedDownloads / elapsed;
-          addLog(`Downloaded ${completedDownloads}/${segments.length} segments (${speed.toFixed(1)} seg/s)`);
+          const speedMbps = elapsed > 0 ? (downloadedBytes / elapsed) / (1024 * 1024) : 0;
+          addLog(`Downloaded ${completedDownloads}/${segments.length} segments (${speedMbps.toFixed(2)} MB/s)`);
         }
       };
       

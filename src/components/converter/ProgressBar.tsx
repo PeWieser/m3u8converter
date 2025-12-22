@@ -1,14 +1,49 @@
 import { useMemo } from 'react';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Gauge, Clock, MonitorPlay } from 'lucide-react';
 
 interface ProgressBarProps {
   progress: number;
   status: string;
   logs: string[];
   estimatedSize?: number;
+  downloadSpeed?: number;
+  remainingTime?: number;
+  videoQuality?: string;
 }
 
-export function ProgressBar({ progress, status, logs, estimatedSize }: ProgressBarProps) {
+function formatSpeed(bytesPerSecond: number): string {
+  if (bytesPerSecond >= 1024 * 1024) {
+    return `${(bytesPerSecond / (1024 * 1024)).toFixed(2)} MB/s`;
+  }
+  if (bytesPerSecond >= 1024) {
+    return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
+  }
+  return `${bytesPerSecond.toFixed(0)} B/s`;
+}
+
+function formatTime(seconds: number): string {
+  if (seconds < 60) {
+    return `${Math.round(seconds)}s`;
+  }
+  if (seconds < 3600) {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    return `${mins}m ${secs}s`;
+  }
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  return `${hours}h ${mins}m`;
+}
+
+export function ProgressBar({ 
+  progress, 
+  status, 
+  logs, 
+  downloadSpeed,
+  remainingTime,
+  videoQuality,
+}: ProgressBarProps) {
   const statusLabel = useMemo(() => {
     switch (status) {
       case 'pending': return 'Waiting...';
@@ -51,11 +86,27 @@ export function ProgressBar({ progress, status, logs, estimatedSize }: ProgressB
           )}
         </div>
         
-        {estimatedSize && (
-          <p className="text-xs text-muted-foreground">
-            Estimated size: ~{(estimatedSize / 1024 / 1024).toFixed(1)} MB
-          </p>
-        )}
+        {/* Stats row */}
+        <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+          {videoQuality && (
+            <div className="flex items-center gap-1">
+              <MonitorPlay className="h-3 w-3" />
+              <span>{videoQuality}</span>
+            </div>
+          )}
+          {downloadSpeed !== undefined && downloadSpeed > 0 && status === 'downloading' && (
+            <div className="flex items-center gap-1">
+              <Gauge className="h-3 w-3" />
+              <span>{formatSpeed(downloadSpeed)}</span>
+            </div>
+          )}
+          {remainingTime !== undefined && remainingTime > 0 && status === 'downloading' && (
+            <div className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              <span>~{formatTime(remainingTime)} remaining</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Logs */}

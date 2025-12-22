@@ -35,6 +35,18 @@ export interface ConversionJob {
   startTime?: number;
   endTime?: number;
   error?: string;
+  // Download stats
+  downloadSpeed?: number; // bytes per second
+  downloadedBytes?: number;
+  totalBytes?: number;
+  remainingTime?: number; // seconds
+  // Video quality from M3U8
+  videoQuality?: string;
+  // TMDB data for TV series
+  tmdbId?: number;
+  tmdbType?: 'movie' | 'tv';
+  selectedSeason?: number;
+  selectedEpisode?: number;
 }
 
 export interface ConversionMetadata {

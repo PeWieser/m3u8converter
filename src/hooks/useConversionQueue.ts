@@ -84,7 +84,9 @@ export function useConversionQueue() {
       const blob = await convert(
         job,
         (progress, logs) => updateJob(job.id, { progress, logs }),
-        (size) => updateJob(job.id, { estimatedSize: size })
+        (size) => updateJob(job.id, { estimatedSize: size }),
+        (stats) => updateJob(job.id, { downloadSpeed: stats.speed, remainingTime: stats.remainingTime }),
+        (quality) => updateJob(job.id, { videoQuality: quality })
       );
 
       const outputUrl = URL.createObjectURL(blob);

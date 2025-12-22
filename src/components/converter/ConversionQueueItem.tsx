@@ -128,7 +128,9 @@ export function ConversionQueueItem({
             progress={job.progress}
             status={job.status}
             logs={job.logs}
-            estimatedSize={job.estimatedSize}
+            downloadSpeed={job.downloadSpeed}
+            remainingTime={job.remainingTime}
+            videoQuality={job.videoQuality}
           />
         )}
 
