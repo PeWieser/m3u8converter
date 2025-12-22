@@ -141,12 +141,22 @@ export function ConversionQueueItem({
 
         {/* Completed preview */}
         {isCompleted && job.outputUrl && (
-          <VideoPreview
-            url={job.outputUrl}
-            blob={job.outputBlob}
-            filename={`${job.metadata.title || job.name}.${job.audioOnly ? 'mp3' : 'mp4'}`}
-            isAudio={job.audioOnly}
-          />
+          <>
+            <VideoPreview
+              url={job.outputUrl}
+              blob={job.outputBlob}
+              filename={`${job.metadata.title || job.name}.${job.audioOnly ? 'mp3' : 'mp4'}`}
+              isAudio={job.audioOnly}
+            />
+            {/* Metadata editor for completed jobs */}
+            {viewMode === 'list' && (
+              <MetadataEditor
+                metadata={job.metadata}
+                onChange={onMetadataChange}
+                defaultExpanded={false}
+              />
+            )}
+          </>
         )}
       </div>
     </div>
