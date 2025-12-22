@@ -96,36 +96,52 @@ export function useFFmpeg() {
         : (playlist.totalDuration || 0) * 500 * 1024; // ~4Mbps
       onEstimatedSize(estimatedSize);
 
-      // Download segments
-      addLog('Downloading segments...');
-      const segmentFiles: string[] = [];
+      // Download segments with parallel threads
+      const CONCURRENT_DOWNLOADS = 6; // Number of parallel download threads
+      addLog(`Downloading segments (${CONCURRENT_DOWNLOADS} parallel threads)...`);
+      const segmentFiles: string[] = new Array(segments.length).fill('');
+      let completedDownloads = 0;
       
-      for (let i = 0; i < segments.length; i++) {
-        const segment = segments[i];
-        const filename = `segment_${i.toString().padStart(4, '0')}.ts`;
+      const downloadSegment = async (index: number): Promise<void> => {
+        const segment = segments[index];
+        const filename = `segment_${index.toString().padStart(4, '0')}.ts`;
         
         try {
           const segmentData = await fetchFile(segment.uri);
           await ffmpeg.writeFile(filename, segmentData);
-          segmentFiles.push(filename);
-          
-          const downloadProgress = ((i + 1) / segments.length) * 50;
-          onProgress(downloadProgress, logs);
-          
-          if ((i + 1) % 10 === 0 || i === segments.length - 1) {
-            addLog(`Downloaded ${i + 1}/${segments.length} segments`);
-          }
+          segmentFiles[index] = filename;
         } catch (error) {
-          addLog(`Warning: Failed to download segment ${i}, skipping...`);
+          addLog(`Warning: Failed to download segment ${index}, skipping...`);
+          segmentFiles[index] = '';
         }
+        
+        completedDownloads++;
+        const downloadProgress = (completedDownloads / segments.length) * 50;
+        onProgress(downloadProgress, logs);
+        
+        if (completedDownloads % 10 === 0 || completedDownloads === segments.length) {
+          addLog(`Downloaded ${completedDownloads}/${segments.length} segments`);
+        }
+      };
+      
+      // Process segments in batches for parallel downloading
+      for (let i = 0; i < segments.length; i += CONCURRENT_DOWNLOADS) {
+        const batch = segments.slice(i, i + CONCURRENT_DOWNLOADS);
+        const batchPromises = batch.map((_, batchIndex) => 
+          downloadSegment(i + batchIndex)
+        );
+        await Promise.all(batchPromises);
       }
+      
+      // Filter out failed downloads while maintaining order
+      const validSegmentFiles = segmentFiles.filter(f => f !== '');
 
-      if (segmentFiles.length === 0) {
+      if (validSegmentFiles.length === 0) {
         throw new Error('No segments could be downloaded');
       }
 
       // Create concat file
-      const concatContent = segmentFiles.map(f => `file '${f}'`).join('\n');
+      const concatContent = validSegmentFiles.map(f => `file '${f}'`).join('\n');
       await ffmpeg.writeFile('concat.txt', concatContent);
 
       addLog('Converting to ' + (job.audioOnly ? 'MP3' : 'MP4') + '...');
@@ -147,7 +163,7 @@ export function useFFmpeg() {
       const data = await ffmpeg.readFile(outputFile);
       
       // Cleanup
-      for (const file of segmentFiles) {
+      for (const file of validSegmentFiles) {
         try { await ffmpeg.deleteFile(file); } catch {}
       }
       try { await ffmpeg.deleteFile('concat.txt'); } catch {}
