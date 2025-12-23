@@ -1,9 +1,10 @@
 import { useState, useCallback } from 'react';
-import { FileVideo, Zap, Shield, Sparkles, Download, LayoutGrid, LayoutList, CheckSquare } from 'lucide-react';
+import { FileVideo, Zap, Shield, Sparkles, Download, LayoutGrid, LayoutList, CheckSquare, Edit } from 'lucide-react';
 import { FileDropzone } from '@/components/converter/FileDropzone';
 import { URLInput } from '@/components/converter/URLInput';
 import { ConversionQueueItem } from '@/components/converter/ConversionQueueItem';
 import { ConversionHistory } from '@/components/converter/ConversionHistory';
+import { MP4Editor } from '@/components/converter/MP4Editor';
 import { useConversionQueue } from '@/hooks/useConversionQueue';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ import JSZip from 'jszip';
 type ViewMode = 'list' | 'grid';
 
 const Index = () => {
+  const [mainTab, setMainTab] = useState<'converter' | 'editor'>('converter');
   const [isDragging, setIsDragging] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -257,167 +259,187 @@ const Index = () => {
       {/* Main Content */}
       <main className="container mx-auto px-4 pb-16">
         <div className="max-w-4xl mx-auto space-y-8">
-          {/* Input Section */}
-          <div className="space-y-4">
-            <FileDropzone
-              onFileDrop={handleFileDrop}
-              onUrlSubmit={handleUrlSubmit}
-              isDragging={isDragging}
-              setIsDragging={setIsDragging}
-            />
-            
-            <div className="flex items-center gap-4">
-              <div className="flex-1 h-px bg-border/50" />
-              <span className="text-xs text-muted-foreground uppercase tracking-wider">or</span>
-              <div className="flex-1 h-px bg-border/50" />
-            </div>
-            
-            <URLInput onSubmit={handleUrlSubmit} />
-          </div>
+          {/* Main Tabs: Converter vs Editor */}
+          <Tabs value={mainTab} onValueChange={(v) => setMainTab(v as 'converter' | 'editor')}>
+            <TabsList className="glass border-none mb-6">
+              <TabsTrigger value="converter" className="data-[state=active]:bg-primary/20 gap-2">
+                <FileVideo className="h-4 w-4" />
+                M3U8 Converter
+              </TabsTrigger>
+              <TabsTrigger value="editor" className="data-[state=active]:bg-primary/20 gap-2">
+                <Edit className="h-4 w-4" />
+                MP4 Editor
+              </TabsTrigger>
+            </TabsList>
 
-          {/* Queue Tabs */}
-          {jobs.length > 0 && (
-            <Tabs defaultValue="queue" className="w-full">
-              <div className="flex items-center justify-between gap-4 mb-4">
-                <TabsList className="glass border-none">
-                  <TabsTrigger value="queue" className="data-[state=active]:bg-primary/20">
-                    Queue ({pendingJobs.length + activeJobs.length})
-                  </TabsTrigger>
-                  <TabsTrigger value="completed" className="data-[state=active]:bg-primary/20">
-                    Completed ({completedJobs.length + errorJobs.length})
-                  </TabsTrigger>
-                </TabsList>
-
-                {/* View Toggle */}
-                <div className="flex items-center gap-1 glass rounded-lg p-1">
-                  <Button
-                    variant={viewMode === 'list' ? 'secondary' : 'ghost'}
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => setViewMode('list')}
-                  >
-                    <LayoutList className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => setViewMode('grid')}
-                  >
-                    <LayoutGrid className="h-4 w-4" />
-                  </Button>
+            <TabsContent value="converter" className="mt-0 space-y-8">
+              {/* Input Section */}
+              <div className="space-y-4">
+                <FileDropzone
+                  onFileDrop={handleFileDrop}
+                  onUrlSubmit={handleUrlSubmit}
+                  isDragging={isDragging}
+                  setIsDragging={setIsDragging}
+                />
+                
+                <div className="flex items-center gap-4">
+                  <div className="flex-1 h-px bg-border/50" />
+                  <span className="text-xs text-muted-foreground uppercase tracking-wider">or</span>
+                  <div className="flex-1 h-px bg-border/50" />
                 </div>
+                
+                <URLInput onSubmit={handleUrlSubmit} />
               </div>
-              
-              <TabsContent value="queue" className="mt-0">
-                {activeJobs.length === 0 && pendingJobs.length === 0 ? (
-                  <div className="glass rounded-xl p-8 text-center">
-                    <p className="text-muted-foreground">No items in queue</p>
-                  </div>
-                ) : (
-                  <div className={viewMode === 'grid' 
-                    ? 'grid grid-cols-1 md:grid-cols-2 gap-4' 
-                    : 'space-y-4'
-                  }>
-                    {activeJobs.map(job => (
-                      <ConversionQueueItem
-                        key={job.id}
-                        job={job}
-                        onStart={() => handleStartConversion(job.id)}
-                        onRemove={() => removeJob(job.id)}
-                        onMetadataChange={(meta) => setMetadata(job.id, meta)}
-                        onAudioOnlyChange={(audioOnly) => setAudioOnly(job.id, audioOnly)}
-                        viewMode={viewMode}
-                      />
-                    ))}
-                    {pendingJobs.map(job => (
-                      <ConversionQueueItem
-                        key={job.id}
-                        job={job}
-                        onStart={() => handleStartConversion(job.id)}
-                        onRemove={() => removeJob(job.id)}
-                        onMetadataChange={(meta) => setMetadata(job.id, meta)}
-                        onAudioOnlyChange={(audioOnly) => setAudioOnly(job.id, audioOnly)}
-                        viewMode={viewMode}
-                      />
-                    ))}
-                  </div>
-                )}
-              </TabsContent>
-              
-              <TabsContent value="completed" className="mt-0 space-y-4">
-                {/* Batch download controls */}
-                {downloadableJobs.length > 0 && (
-                  <div className="flex flex-wrap items-center justify-between gap-3 p-3 glass rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <Checkbox 
-                        checked={allSelectedItems}
-                        onCheckedChange={() => allSelectedItems ? deselectAll() : selectAll()}
-                        id="select-all"
-                      />
-                      <label htmlFor="select-all" className="text-sm cursor-pointer">
-                        {allSelectedItems ? 'Deselect all' : 'Select all'}
-                      </label>
-                      {someSelectedItems && (
-                        <span className="text-xs text-muted-foreground">
-                          ({selectedIds.size} selected)
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {someSelectedItems && (
-                        <Button 
-                          size="sm" 
-                          variant="secondary"
-                          onClick={downloadSelected}
-                        >
-                          <Download className="h-4 w-4 mr-2" />
-                          Download Selected
-                        </Button>
-                      )}
-                      <Button 
-                        size="sm" 
-                        onClick={downloadAll}
-                        className="bg-gradient-to-r from-primary to-accent hover:opacity-90"
+
+              {/* Queue Tabs */}
+              {jobs.length > 0 && (
+                <Tabs defaultValue="queue" className="w-full">
+                  <div className="flex items-center justify-between gap-4 mb-4">
+                    <TabsList className="glass border-none">
+                      <TabsTrigger value="queue" className="data-[state=active]:bg-primary/20">
+                        Queue ({pendingJobs.length + activeJobs.length})
+                      </TabsTrigger>
+                      <TabsTrigger value="completed" className="data-[state=active]:bg-primary/20">
+                        Completed ({completedJobs.length + errorJobs.length})
+                      </TabsTrigger>
+                    </TabsList>
+
+                    {/* View Toggle */}
+                    <div className="flex items-center gap-1 glass rounded-lg p-1">
+                      <Button
+                        variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => setViewMode('list')}
                       >
-                        <Download className="h-4 w-4 mr-2" />
-                        Download All
+                        <LayoutList className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant={viewMode === 'grid' ? 'secondary' : 'ghost'}
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => setViewMode('grid')}
+                      >
+                        <LayoutGrid className="h-4 w-4" />
                       </Button>
                     </div>
                   </div>
-                )}
+                  
+                  <TabsContent value="queue" className="mt-0">
+                    {activeJobs.length === 0 && pendingJobs.length === 0 ? (
+                      <div className="glass rounded-xl p-8 text-center">
+                        <p className="text-muted-foreground">No items in queue</p>
+                      </div>
+                    ) : (
+                      <div className={viewMode === 'grid' 
+                        ? 'grid grid-cols-1 md:grid-cols-2 gap-4' 
+                        : 'space-y-4'
+                      }>
+                        {activeJobs.map(job => (
+                          <ConversionQueueItem
+                            key={job.id}
+                            job={job}
+                            onStart={() => handleStartConversion(job.id)}
+                            onRemove={() => removeJob(job.id)}
+                            onMetadataChange={(meta) => setMetadata(job.id, meta)}
+                            onAudioOnlyChange={(audioOnly) => setAudioOnly(job.id, audioOnly)}
+                            viewMode={viewMode}
+                          />
+                        ))}
+                        {pendingJobs.map(job => (
+                          <ConversionQueueItem
+                            key={job.id}
+                            job={job}
+                            onStart={() => handleStartConversion(job.id)}
+                            onRemove={() => removeJob(job.id)}
+                            onMetadataChange={(meta) => setMetadata(job.id, meta)}
+                            onAudioOnlyChange={(audioOnly) => setAudioOnly(job.id, audioOnly)}
+                            viewMode={viewMode}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+                  
+                  <TabsContent value="completed" className="mt-0 space-y-4">
+                    {/* Batch download controls */}
+                    {downloadableJobs.length > 0 && (
+                      <div className="flex flex-wrap items-center justify-between gap-3 p-3 glass rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <Checkbox 
+                            checked={allSelectedItems}
+                            onCheckedChange={() => allSelectedItems ? deselectAll() : selectAll()}
+                            id="select-all"
+                          />
+                          <label htmlFor="select-all" className="text-sm cursor-pointer">
+                            {allSelectedItems ? 'Deselect all' : 'Select all'}
+                          </label>
+                          {someSelectedItems && (
+                            <span className="text-xs text-muted-foreground">
+                              ({selectedIds.size} selected)
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {someSelectedItems && (
+                            <Button 
+                              size="sm" 
+                              variant="secondary"
+                              onClick={downloadSelected}
+                            >
+                              <Download className="h-4 w-4 mr-2" />
+                              Download Selected
+                            </Button>
+                          )}
+                          <Button 
+                            size="sm" 
+                            onClick={downloadAll}
+                            className="bg-gradient-to-r from-primary to-accent hover:opacity-90"
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Download All
+                          </Button>
+                        </div>
+                      </div>
+                    )}
 
-                {completedJobs.length === 0 && errorJobs.length === 0 ? (
-                  <div className="glass rounded-xl p-8 text-center">
-                    <p className="text-muted-foreground">No completed conversions</p>
-                  </div>
-                ) : (
-                  <div className={viewMode === 'grid' 
-                    ? 'grid grid-cols-1 md:grid-cols-2 gap-4' 
-                    : 'space-y-4'
-                  }>
-                    {[...completedJobs, ...errorJobs].map(job => (
-                      <ConversionQueueItem
-                        key={job.id}
-                        job={job}
-                        onStart={() => {}}
-                        onRemove={() => removeJob(job.id)}
-                        onMetadataChange={(meta) => setMetadata(job.id, meta)}
-                        onAudioOnlyChange={(audioOnly) => setAudioOnly(job.id, audioOnly)}
-                        viewMode={viewMode}
-                        isSelected={selectedIds.has(job.id)}
-                        onSelectionChange={() => toggleSelection(job.id)}
-                        showCheckbox={job.status === 'completed' && !!job.outputBlob}
-                      />
-                    ))}
-                  </div>
-                )}
-              </TabsContent>
-            </Tabs>
-          )}
+                    {completedJobs.length === 0 && errorJobs.length === 0 ? (
+                      <div className="glass rounded-xl p-8 text-center">
+                        <p className="text-muted-foreground">No completed conversions</p>
+                      </div>
+                    ) : (
+                      <div className={viewMode === 'grid' 
+                        ? 'grid grid-cols-1 md:grid-cols-2 gap-4' 
+                        : 'space-y-4'
+                      }>
+                        {[...completedJobs, ...errorJobs].map(job => (
+                          <ConversionQueueItem
+                            key={job.id}
+                            job={job}
+                            onStart={() => {}}
+                            onRemove={() => removeJob(job.id)}
+                            onMetadataChange={(meta) => setMetadata(job.id, meta)}
+                            onAudioOnlyChange={(audioOnly) => setAudioOnly(job.id, audioOnly)}
+                            viewMode={viewMode}
+                            isSelected={selectedIds.has(job.id)}
+                            onSelectionChange={() => toggleSelection(job.id)}
+                            showCheckbox={job.status === 'completed' && !!job.outputBlob}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
+              )}
 
-          {/* History Section */}
-          <ConversionHistory history={history} onClear={clearHistory} />
+              {/* History Section */}
+              <ConversionHistory history={history} onClear={clearHistory} />
+            </TabsContent>
+
+            <TabsContent value="editor" className="mt-0">
+              <MP4Editor />
+            </TabsContent>
+          </Tabs>
         </div>
       </main>
 

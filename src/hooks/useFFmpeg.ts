@@ -266,20 +266,90 @@ export function useFFmpeg() {
       addLog('Converting to ' + (job.audioOnly ? 'MP3' : 'MP4') + '...');
       
       const outputFile = job.audioOnly ? 'output.mp3' : 'output.mp4';
+      const finalOutputFile = job.audioOnly ? 'final.mp3' : 'final.mp4';
       
       ffmpeg.on('progress', ({ progress }) => {
         const conversionProgress = 50 + (progress * 50);
         onProgress(Math.min(conversionProgress, 99), logs);
       });
 
-      const args = job.audioOnly
+      // First pass: concat segments
+      const concatArgs = job.audioOnly
         ? ['-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-vn', '-acodec', 'libmp3lame', '-q:a', '2', outputFile]
         : ['-f', 'concat', '-safe', '0', '-i', 'concat.txt', '-c', 'copy', '-movflags', '+faststart', outputFile];
 
-      await ffmpeg.exec(args);
+      await ffmpeg.exec(concatArgs);
+
+      // Second pass: add metadata and thumbnail
+      addLog('Embedding metadata...');
+      
+      const metadataArgs: string[] = ['-i', outputFile];
+      
+      // Handle thumbnail/cover image
+      let hasCover = false;
+      if (job.metadata.thumbnail) {
+        try {
+          const thumbnailResponse = await fetch(job.metadata.thumbnail);
+          const thumbnailBlob = await thumbnailResponse.arrayBuffer();
+          await ffmpeg.writeFile('cover.jpg', new Uint8Array(thumbnailBlob));
+          metadataArgs.push('-i', 'cover.jpg');
+          hasCover = true;
+        } catch (e) {
+          addLog('Warning: Could not fetch thumbnail');
+        }
+      }
+      
+      // Map streams
+      metadataArgs.push('-map', '0');
+      if (hasCover && !job.audioOnly) {
+        metadataArgs.push('-map', '1');
+      }
+      
+      // Copy streams without re-encoding
+      metadataArgs.push('-c', 'copy');
+      
+      // Set cover disposition if present
+      if (hasCover && !job.audioOnly) {
+        metadataArgs.push('-disposition:v:1', 'attached_pic');
+      }
+      
+      // Add all metadata
+      if (job.metadata.title) {
+        metadataArgs.push('-metadata', `title=${job.metadata.title}`);
+      }
+      if (job.metadata.show) {
+        metadataArgs.push('-metadata', `show=${job.metadata.show}`);
+      }
+      if (job.metadata.season) {
+        metadataArgs.push('-metadata', `season_number=${job.metadata.season}`);
+      }
+      if (job.metadata.episode) {
+        metadataArgs.push('-metadata', `episode_sort=${job.metadata.episode}`);
+      }
+      if (job.metadata.date) {
+        metadataArgs.push('-metadata', `date=${job.metadata.date}`);
+      }
+      if (job.metadata.director || job.metadata.author) {
+        metadataArgs.push('-metadata', `artist=${job.metadata.director || job.metadata.author}`);
+      }
+      if (job.metadata.genre) {
+        metadataArgs.push('-metadata', `genre=${job.metadata.genre}`);
+      }
+      if (job.metadata.description) {
+        metadataArgs.push('-metadata', `description=${job.metadata.description}`);
+      }
+      
+      // MP3-specific tags
+      if (job.audioOnly && job.metadata.author) {
+        metadataArgs.push('-metadata', `artist=${job.metadata.author}`);
+      }
+      
+      metadataArgs.push('-movflags', '+faststart', finalOutputFile);
+      
+      await ffmpeg.exec(metadataArgs);
 
       addLog('Reading output file...');
-      const data = await ffmpeg.readFile(outputFile);
+      const data = await ffmpeg.readFile(finalOutputFile);
       
       // Cleanup
       for (const file of validSegmentFiles) {
@@ -287,6 +357,8 @@ export function useFFmpeg() {
       }
       try { await ffmpeg.deleteFile('concat.txt'); } catch {}
       try { await ffmpeg.deleteFile(outputFile); } catch {}
+      try { await ffmpeg.deleteFile(finalOutputFile); } catch {}
+      try { await ffmpeg.deleteFile('cover.jpg'); } catch {}
 
       const mimeType = job.audioOnly ? 'audio/mp3' : 'video/mp4';
       let arrayBuffer: ArrayBuffer;

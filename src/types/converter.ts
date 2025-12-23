@@ -53,6 +53,14 @@ export interface ConversionMetadata {
   title: string;
   author: string;
   thumbnail?: string;
+  // Extended metadata for MP4
+  show?: string;
+  season?: string;
+  episode?: string;
+  date?: string;
+  director?: string;
+  genre?: string;
+  description?: string;
 }
 
 export interface ConversionHistory {
