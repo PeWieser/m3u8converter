@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 
-const TMDB_API_KEY = '7e8d48460950111f90be1d1ee5c83e34';
-const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
 export interface TmdbResult {
@@ -65,15 +64,13 @@ export function useTmdbSearch() {
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const response = await fetch(
-          `${TMDB_BASE_URL}/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&language=de-DE&include_adult=false`
-        );
+        const { data, error } = await supabase.functions.invoke('tmdb-proxy', {
+          body: { action: 'search', query }
+        });
         
-        if (!response.ok) {
+        if (error) {
           throw new Error('TMDB API request failed');
         }
-        
-        const data = await response.json();
         
         // Filter for movies and TV shows only
         const items = (data.results || [])
@@ -107,29 +104,23 @@ export function useTmdbSearch() {
 
   const fetchDetails = useCallback(async (id: number, type: 'movie' | 'tv'): Promise<TmdbDetails | null> => {
     try {
-      const endpoint = type === 'movie' ? 'movie' : 'tv';
-      const creditsEndpoint = type === 'movie' ? 'credits' : 'credits';
+      const action = type === 'movie' ? 'movie-details' : 'tv-details';
       
-      // Fetch main details and credits in parallel
-      const [detailsRes, creditsRes] = await Promise.all([
-        fetch(`${TMDB_BASE_URL}/${endpoint}/${id}?api_key=${TMDB_API_KEY}&language=de-DE`),
-        fetch(`${TMDB_BASE_URL}/${endpoint}/${id}/${creditsEndpoint}?api_key=${TMDB_API_KEY}`)
-      ]);
+      const { data: details, error } = await supabase.functions.invoke('tmdb-proxy', {
+        body: { action, id }
+      });
       
-      if (!detailsRes.ok) {
+      if (error || !details) {
         throw new Error('TMDB API request failed');
       }
       
-      const details = await detailsRes.json();
-      const credits = creditsRes.ok ? await creditsRes.json() : null;
-      
-      // Extract director or creators
+      // Extract director or creators from credits
       let director: string | undefined;
       let creators: string[] | undefined;
       
-      if (credits) {
+      if (details.credits) {
         if (type === 'movie') {
-          const directorEntry = credits.crew?.find((c: any) => c.job === 'Director');
+          const directorEntry = details.credits.crew?.find((c: any) => c.job === 'Director');
           director = directorEntry?.name;
         } else {
           creators = details.created_by?.map((c: any) => c.name) || [];
@@ -179,15 +170,13 @@ export function useTmdbSearch() {
 
   const fetchSeasonEpisodes = useCallback(async (tvId: number, seasonNumber: number): Promise<TmdbEpisode[]> => {
     try {
-      const response = await fetch(
-        `${TMDB_BASE_URL}/tv/${tvId}/season/${seasonNumber}?api_key=${TMDB_API_KEY}&language=de-DE`
-      );
+      const { data, error } = await supabase.functions.invoke('tmdb-proxy', {
+        body: { action: 'season-episodes', id: tvId, seasonNumber }
+      });
       
-      if (!response.ok) {
+      if (error || !data) {
         throw new Error('TMDB API request failed');
       }
-      
-      const data = await response.json();
       
       return (data.episodes || []).map((ep: any) => ({
         episodeNumber: ep.episode_number,
