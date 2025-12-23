@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Link2, ArrowRight, Loader2 } from 'lucide-react';
+import { Link2, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { validateM3U8Url } from '@/lib/url-validator';
 
 interface URLInputProps {
   onSubmit: (url: string) => void;
@@ -11,17 +12,37 @@ interface URLInputProps {
 export function URLInput({ onSubmit, disabled }: URLInputProps) {
   const [url, setUrl] = useState('');
   const [isValidating, setIsValidating] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url.trim()) return;
     
     setIsValidating(true);
+    setValidationError(null);
+    
+    // Validate URL
+    const validation = validateM3U8Url(url.trim());
+    
+    if (!validation.valid) {
+      setValidationError(validation.error || 'Ungültige URL');
+      setIsValidating(false);
+      return;
+    }
+    
     // Brief validation delay for UX
-    await new Promise(resolve => setTimeout(resolve, 300));
-    onSubmit(url.trim());
+    await new Promise(resolve => setTimeout(resolve, 200));
+    onSubmit(validation.sanitizedUrl || url.trim());
     setUrl('');
     setIsValidating(false);
+  };
+
+  const handleUrlChange = (value: string) => {
+    setUrl(value);
+    // Clear error when user types
+    if (validationError) {
+      setValidationError(null);
+    }
   };
 
   const isValidUrl = url.trim().length > 0 && (
@@ -39,10 +60,12 @@ export function URLInput({ onSubmit, disabled }: URLInputProps) {
           <Input
             type="url"
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={(e) => handleUrlChange(e.target.value)}
             placeholder="Paste M3U8 URL here..."
             disabled={disabled || isValidating}
-            className="pl-10 bg-secondary/50 border-border/50 focus:border-primary/50 focus:ring-primary/20"
+            className={`pl-10 bg-secondary/50 border-border/50 focus:border-primary/50 focus:ring-primary/20 ${
+              validationError ? 'border-destructive/50 focus:border-destructive' : ''
+            }`}
           />
         </div>
         <Button
@@ -60,6 +83,14 @@ export function URLInput({ onSubmit, disabled }: URLInputProps) {
           )}
         </Button>
       </div>
+      
+      {/* Validation error message */}
+      {validationError && (
+        <div className="flex items-center gap-2 mt-2 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 flex-shrink-0" />
+          <span>{validationError}</span>
+        </div>
+      )}
     </form>
   );
 }
