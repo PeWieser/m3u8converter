@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import type { ConversionJob, ConversionHistory, M3U8Variant } from '@/types/converter';
 import { useFFmpeg } from './useFFmpeg';
+import { useDownloadOptimizer } from './useDownloadOptimizer';
 
 const HISTORY_KEY = 'm3u8_converter_history';
 
@@ -21,6 +22,7 @@ export function useConversionQueue() {
   const [jobs, setJobs] = useState<ConversionJob[]>([]);
   const [history, setHistory] = useState<ConversionHistory[]>(loadHistory);
   const { load, loaded, loading, convert } = useFFmpeg();
+  const optimizer = useDownloadOptimizer();
   const processingRef = useRef(false);
 
   const addJob = useCallback((
@@ -78,6 +80,9 @@ export function useConversionQueue() {
       await load();
     }
 
+    // Reset optimizer for new download
+    optimizer.reset();
+    
     updateJob(job.id, { status: 'downloading', startTime: Date.now() });
 
     try {
@@ -86,7 +91,9 @@ export function useConversionQueue() {
         (progress, logs) => updateJob(job.id, { progress, logs }),
         (size) => updateJob(job.id, { estimatedSize: size }),
         (stats) => updateJob(job.id, { downloadSpeed: stats.speed, remainingTime: stats.remainingTime }),
-        (quality) => updateJob(job.id, { videoQuality: quality })
+        (quality) => updateJob(job.id, { videoQuality: quality }),
+        optimizer.settings.concurrency,
+        optimizer.settings.enabled ? optimizer.optimize : undefined
       );
 
       const outputUrl = URL.createObjectURL(blob);
@@ -124,7 +131,7 @@ export function useConversionQueue() {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
-  }, [loaded, load, convert, updateJob]);
+  }, [loaded, load, convert, updateJob, optimizer]);
 
   const processQueue = useCallback(async () => {
     if (processingRef.current) return;
@@ -166,5 +173,14 @@ export function useConversionQueue() {
     ffmpegLoaded: loaded,
     ffmpegLoading: loading,
     loadFFmpeg: load,
+    // Optimizer
+    optimizer: {
+      settings: optimizer.settings,
+      stats: optimizer.stats,
+      setEnabled: optimizer.setEnabled,
+      setConcurrency: optimizer.setConcurrency,
+      MIN_CONCURRENCY: optimizer.MIN_CONCURRENCY,
+      MAX_CONCURRENCY: optimizer.MAX_CONCURRENCY,
+    },
   };
 }

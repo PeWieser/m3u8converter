@@ -5,6 +5,7 @@ import { URLInput } from '@/components/converter/URLInput';
 import { ConversionQueueItem } from '@/components/converter/ConversionQueueItem';
 import { ConversionHistory } from '@/components/converter/ConversionHistory';
 import { MP4Editor } from '@/components/converter/MP4Editor';
+import { OptimizerSettings } from '@/components/converter/OptimizerSettings';
 import { useConversionQueue } from '@/hooks/useConversionQueue';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,7 @@ const Index = () => {
     clearHistory,
     ffmpegLoading,
     loadFFmpeg,
+    optimizer,
   } = useConversionQueue();
 
   const handleFileDrop = useCallback(async (files: File[]) => {
@@ -289,6 +291,17 @@ const Index = () => {
                 </div>
                 
                 <URLInput onSubmit={handleUrlSubmit} />
+                
+                {/* Download Optimizer Settings */}
+                <OptimizerSettings
+                  enabled={optimizer.settings.enabled}
+                  concurrency={optimizer.settings.concurrency}
+                  minConcurrency={optimizer.MIN_CONCURRENCY}
+                  maxConcurrency={optimizer.MAX_CONCURRENCY}
+                  stats={optimizer.stats}
+                  onEnabledChange={optimizer.setEnabled}
+                  onConcurrencyChange={optimizer.setConcurrency}
+                />
               </div>
 
               {/* Queue Tabs */}
