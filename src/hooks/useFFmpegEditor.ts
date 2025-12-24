@@ -144,16 +144,16 @@ export function useFFmpegEditor() {
         try { await ffmpeg.deleteFile(`cover.${coverFile.name.split('.').pop()?.toLowerCase() || 'jpg'}`); } catch {}
       }
 
-      // Create blob
-      let arrayBuffer: ArrayBuffer;
-      if (typeof data === 'string') {
-        arrayBuffer = new TextEncoder().encode(data).buffer as ArrayBuffer;
-      } else {
-        arrayBuffer = new ArrayBuffer(data.byteLength);
-        new Uint8Array(arrayBuffer).set(data);
+      // Create blob properly - data is Uint8Array
+      const uint8Array = data instanceof Uint8Array ? data : new TextEncoder().encode(data as string);
+      const blob = new Blob([new Uint8Array(uint8Array).buffer as ArrayBuffer], { type: 'video/mp4' });
+      
+      console.log('Output blob size:', blob.size);
+      
+      if (blob.size === 0) {
+        throw new Error('Output file is empty - FFmpeg processing may have failed');
       }
       
-      const blob = new Blob([arrayBuffer], { type: 'video/mp4' });
       setProgress(100);
       
       return blob;
