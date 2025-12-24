@@ -98,7 +98,7 @@ serve(async (req) => {
       );
     }
 
-    const { action, query, id, type, seasonNumber } = body;
+    const { action, query, id, type, seasonNumber, imageUrl } = body;
 
     // Validate action parameter
     if (!action || typeof action !== 'string') {
@@ -108,13 +108,58 @@ serve(async (req) => {
       );
     }
 
-    const validActions = ['search', 'movie-details', 'tv-details', 'season-episodes'];
+    const validActions = ['search', 'movie-details', 'tv-details', 'season-episodes', 'proxy-image'];
     if (!validActions.includes(action)) {
       console.warn(`Invalid action attempted: ${action}`);
       return new Response(
         JSON.stringify({ error: 'Unknown action' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // Handle image proxy action separately (returns binary data)
+    if (action === 'proxy-image') {
+      if (!imageUrl || typeof imageUrl !== 'string') {
+        return new Response(
+          JSON.stringify({ error: 'Missing imageUrl parameter' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      // Only allow TMDB image URLs
+      if (!imageUrl.startsWith('https://image.tmdb.org/')) {
+        return new Response(
+          JSON.stringify({ error: 'Only TMDB image URLs are allowed' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      try {
+        const imgResponse = await fetch(imageUrl);
+        if (!imgResponse.ok) {
+          return new Response(
+            JSON.stringify({ error: 'Failed to fetch image' }),
+            { status: imgResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        
+        const imageData = await imgResponse.arrayBuffer();
+        const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
+        
+        return new Response(imageData, {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': contentType,
+            'Cache-Control': 'public, max-age=86400',
+          }
+        });
+      } catch (error) {
+        console.error('Image proxy error:', error);
+        return new Response(
+          JSON.stringify({ error: 'Failed to proxy image' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
     }
 
     let url: string;

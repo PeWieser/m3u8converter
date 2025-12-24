@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Upload, FileVideo, Image, Download, Loader2, Trash2, Save, Film, Tv, User, Calendar, Tag, FileText } from 'lucide-react';
+import { Upload, FileVideo, Image, Download, Loader2, Trash2, Save, Film, Tv, User, Calendar, Tag, FileText, Link } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,11 +9,14 @@ import { toast } from '@/hooks/use-toast';
 import { useFFmpegEditor } from '@/hooks/useFFmpegEditor';
 import { useTmdbSearch, type TmdbResult } from '@/hooks/useTmdbSearch';
 import type { ConversionMetadata } from '@/types/converter';
+import { supabase } from '@/integrations/supabase/client';
 
 export function MP4Editor() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [coverUrl, setCoverUrl] = useState<string>('');
+  const [coverSource, setCoverSource] = useState<'file' | 'url'>('file');
   const [metadata, setMetadata] = useState<ConversionMetadata>({
     title: '',
     author: '',
@@ -34,6 +37,38 @@ export function MP4Editor() {
   const [seasons, setSeasons] = useState<any[]>([]);
   const [episodes, setEpisodes] = useState<any[]>([]);
   const [selectedTmdb, setSelectedTmdb] = useState<any>(null);
+
+  // Fetch cover image from URL (handles CORS via proxy for TMDB)
+  const fetchCoverFromUrl = useCallback(async (url: string): Promise<File | null> => {
+    if (!url) return null;
+    
+    try {
+      // Check if it's a TMDB URL - use proxy
+      if (url.includes('image.tmdb.org')) {
+        const { data, error } = await supabase.functions.invoke('tmdb-proxy', {
+          body: { action: 'proxy-image', imageUrl: url }
+        });
+        
+        if (error || !data) {
+          console.warn('Failed to proxy TMDB image:', error);
+          return null;
+        }
+        
+        // Convert ArrayBuffer to File
+        const blob = new Blob([data], { type: 'image/jpeg' });
+        return new File([blob], 'cover.jpg', { type: 'image/jpeg' });
+      } else {
+        // Direct fetch for other URLs
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch image');
+        const blob = await response.blob();
+        return new File([blob], 'cover.jpg', { type: blob.type || 'image/jpeg' });
+      }
+    } catch (error) {
+      console.error('Failed to fetch cover:', error);
+      return null;
+    }
+  }, []);
 
   const handleVideoSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -107,20 +142,18 @@ export function MP4Editor() {
         setEpisodes([]);
       }
 
-      // Download poster as cover
+      // Download poster as cover via proxy
       if (details.poster) {
-        try {
-          const response = await fetch(details.poster);
-          const blob = await response.blob();
-          const file = new File([blob], 'cover.jpg', { type: 'image/jpeg' });
-          setCoverFile(file);
+        const coverFileResult = await fetchCoverFromUrl(details.poster);
+        if (coverFileResult) {
+          setCoverFile(coverFileResult);
           setCoverPreview(details.poster);
-        } catch (e) {
-          console.warn('Could not download poster:', e);
+          setCoverSource('url');
+          setCoverUrl(details.poster);
         }
       }
     }
-  }, [fetchDetails, clearResults]);
+  }, [fetchDetails, clearResults, fetchCoverFromUrl]);
 
   const handleSeasonChange = useCallback(async (seasonNumber: string) => {
     setMetadata(prev => ({ ...prev, season: seasonNumber }));
@@ -144,6 +177,26 @@ export function MP4Editor() {
       }));
     }
   }, [episodes, selectedTmdb]);
+
+  // Handle cover URL input
+  const handleCoverUrlChange = useCallback(async (url: string) => {
+    setCoverUrl(url);
+    if (!url) {
+      setCoverPreview(null);
+      setCoverFile(null);
+      return;
+    }
+    
+    // Try to load preview
+    setCoverPreview(url);
+    
+    // Fetch the actual file for embedding
+    const file = await fetchCoverFromUrl(url);
+    if (file) {
+      setCoverFile(file);
+      setCoverSource('url');
+    }
+  }, [fetchCoverFromUrl]);
 
   const handleProcess = useCallback(async () => {
     if (!videoFile) return;
@@ -193,6 +246,8 @@ export function MP4Editor() {
     setVideoFile(null);
     setCoverFile(null);
     setCoverPreview(null);
+    setCoverUrl('');
+    setCoverSource('file');
     setOutputBlob(null);
     setMetadata({
       title: '',
@@ -257,30 +312,83 @@ export function MP4Editor() {
               Cover-Bild (optional)
             </h3>
             
+            {/* Source Toggle */}
+            <div className="flex gap-2 mb-4">
+              <Button
+                variant={coverSource === 'file' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setCoverSource('file')}
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Datei
+              </Button>
+              <Button
+                variant={coverSource === 'url' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setCoverSource('url')}
+              >
+                <Link className="h-4 w-4 mr-2" />
+                URL
+              </Button>
+            </div>
+            
             <div className="flex gap-4">
-              <label className="flex flex-col items-center justify-center w-32 h-44 border-2 border-dashed border-border/50 rounded-lg cursor-pointer hover:bg-secondary/30 transition-colors flex-shrink-0">
+              {/* Cover Preview */}
+              <div className="w-32 h-44 border-2 border-dashed border-border/50 rounded-lg flex-shrink-0 overflow-hidden">
                 {coverPreview ? (
-                  <img src={coverPreview} alt="Cover" className="w-full h-full object-cover rounded-lg" />
+                  <img src={coverPreview} alt="Cover" className="w-full h-full object-cover" />
                 ) : (
-                  <>
-                    <Upload className="h-6 w-6 text-muted-foreground mb-1" />
-                    <span className="text-xs text-muted-foreground text-center">Cover hochladen</span>
-                  </>
+                  <div className="w-full h-full flex flex-col items-center justify-center">
+                    <Image className="h-6 w-6 text-muted-foreground mb-1" />
+                    <span className="text-xs text-muted-foreground text-center">Kein Cover</span>
+                  </div>
                 )}
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleCoverSelect}
-                  className="hidden"
-                />
-              </label>
+              </div>
               
-              {coverPreview && (
-                <Button variant="ghost" size="sm" onClick={() => { setCoverFile(null); setCoverPreview(null); }}>
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Entfernen
-                </Button>
-              )}
+              <div className="flex-1 space-y-3">
+                {coverSource === 'file' ? (
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-2 block">Bild hochladen</Label>
+                    <label className="flex items-center justify-center w-full h-20 border-2 border-dashed border-border/50 rounded-lg cursor-pointer hover:bg-secondary/30 transition-colors">
+                      <div className="text-center">
+                        <Upload className="h-5 w-5 text-muted-foreground mx-auto mb-1" />
+                        <span className="text-xs text-muted-foreground">Klicken oder Datei hierher ziehen</span>
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleCoverSelect}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <div>
+                    <Label className="text-xs text-muted-foreground mb-2 block">Bild-URL</Label>
+                    <Input
+                      value={coverUrl}
+                      onChange={(e) => handleCoverUrlChange(e.target.value)}
+                      placeholder="https://..."
+                      className="bg-secondary/50 border-border/50"
+                    />
+                  </div>
+                )}
+                
+                {coverPreview && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => { 
+                      setCoverFile(null); 
+                      setCoverPreview(null); 
+                      setCoverUrl(''); 
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Entfernen
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
 

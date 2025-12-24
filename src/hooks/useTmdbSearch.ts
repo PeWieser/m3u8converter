@@ -102,6 +102,28 @@ export function useTmdbSearch() {
     setResults([]);
   }, []);
 
+  // Fetch image through our proxy to avoid CORS issues
+  const fetchImageAsBlob = useCallback(async (imageUrl: string): Promise<Blob | null> => {
+    if (!imageUrl) return null;
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('tmdb-proxy', {
+        body: { action: 'proxy-image', imageUrl }
+      });
+      
+      if (error) {
+        console.warn('Failed to proxy image:', error);
+        return null;
+      }
+      
+      // The response is already a blob if successful
+      return data;
+    } catch (error) {
+      console.error('Image fetch error:', error);
+      return null;
+    }
+  }, []);
+
   const fetchDetails = useCallback(async (id: number, type: 'movie' | 'tv'): Promise<TmdbDetails | null> => {
     try {
       const action = type === 'movie' ? 'movie-details' : 'tv-details';
@@ -198,5 +220,6 @@ export function useTmdbSearch() {
     clearResults,
     fetchDetails,
     fetchSeasonEpisodes,
+    fetchImageAsBlob,
   };
 }

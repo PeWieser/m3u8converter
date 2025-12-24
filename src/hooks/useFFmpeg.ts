@@ -6,8 +6,8 @@ import { parseM3U8, getBaseUrl } from '@/lib/m3u8-parser';
 
 const FFMPEG_CORE_URL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
 
-// Number of concurrent download threads - optimized for speed
-const CONCURRENT_DOWNLOADS = 16;
+// Default number of concurrent download threads
+const DEFAULT_CONCURRENT_DOWNLOADS = 8;
 
 // Retry configuration for failed downloads
 const MAX_RETRIES = 3;
@@ -96,7 +96,9 @@ export function useFFmpeg() {
     onProgress: (progress: number, logs: string[]) => void,
     onEstimatedSize: (size: number) => void,
     onDownloadStats: (stats: { speed: number; remainingTime: number }) => void,
-    onVideoQuality: (quality: string) => void
+    onVideoQuality: (quality: string) => void,
+    concurrentDownloads: number = DEFAULT_CONCURRENT_DOWNLOADS,
+    onOptimize?: (speed: number) => number
   ): Promise<Blob> => {
     if (!ffmpegRef.current) {
       throw new Error('FFmpeg not loaded');
@@ -154,7 +156,8 @@ export function useFFmpeg() {
       onEstimatedSize(estimatedSize);
 
       // Download segments with high-speed parallel threads
-      addLog(`Downloading segments (${CONCURRENT_DOWNLOADS} parallel connections)...`);
+      let currentConcurrency = concurrentDownloads;
+      addLog(`Downloading segments (${currentConcurrency} parallel connections)...`);
       
       // RAM buffer for all segments - avoid disk I/O
       const segmentBuffers: Map<number, Uint8Array> = new Map();
@@ -164,6 +167,7 @@ export function useFFmpeg() {
       const startTime = Date.now();
       let lastSpeedUpdate = Date.now();
       let bytesAtLastUpdate = 0;
+      let lastOptimizeTime = Date.now();
       
       // Create a semaphore for controlling concurrency
       const downloadSegment = async (index: number): Promise<void> => {
@@ -198,6 +202,16 @@ export function useFFmpeg() {
           
           onDownloadStats({ speed: currentSpeed, remainingTime });
           
+          // Call optimizer every 5 seconds
+          if (onOptimize && now - lastOptimizeTime >= 5000) {
+            const newConcurrency = onOptimize(currentSpeed);
+            if (newConcurrency !== currentConcurrency) {
+              currentConcurrency = newConcurrency;
+              addLog(`Optimizer adjusted concurrency to ${currentConcurrency}`);
+            }
+            lastOptimizeTime = now;
+          }
+          
           lastSpeedUpdate = now;
           bytesAtLastUpdate = downloadedBytes;
         }
@@ -223,8 +237,8 @@ export function useFFmpeg() {
           await processNext();
         };
         
-        // Start CONCURRENT_DOWNLOADS parallel workers
-        for (let i = 0; i < Math.min(CONCURRENT_DOWNLOADS, segments.length); i++) {
+        // Start with current concurrency (may be adjusted during download)
+        for (let i = 0; i < Math.min(currentConcurrency, segments.length); i++) {
           queue.push(processNext());
         }
         
