@@ -117,7 +117,7 @@ serve(async (req) => {
       );
     }
 
-    // Handle image proxy action separately (returns binary data)
+    // Handle image proxy action separately (returns base64 encoded image)
     if (action === 'proxy-image') {
       if (!imageUrl || typeof imageUrl !== 'string') {
         return new Response(
@@ -135,8 +135,10 @@ serve(async (req) => {
       }
       
       try {
+        console.log('Fetching image from:', imageUrl);
         const imgResponse = await fetch(imageUrl);
         if (!imgResponse.ok) {
+          console.error('Failed to fetch image:', imgResponse.status);
           return new Response(
             JSON.stringify({ error: 'Failed to fetch image' }),
             { status: imgResponse.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -146,17 +148,28 @@ serve(async (req) => {
         const imageData = await imgResponse.arrayBuffer();
         const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
         
-        return new Response(imageData, {
-          headers: {
-            ...corsHeaders,
-            'Content-Type': contentType,
-            'Cache-Control': 'public, max-age=86400',
+        // Convert to base64 for JSON transport
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(imageData)));
+        
+        console.log('Image fetched successfully, size:', imageData.byteLength, 'bytes, type:', contentType);
+        
+        return new Response(
+          JSON.stringify({ 
+            data: base64, 
+            contentType: contentType,
+            size: imageData.byteLength 
+          }),
+          {
+            headers: {
+              ...corsHeaders,
+              'Content-Type': 'application/json',
+            }
           }
-        });
+        );
       } catch (error) {
         console.error('Image proxy error:', error);
         return new Response(
-          JSON.stringify({ error: 'Failed to proxy image' }),
+          JSON.stringify({ error: 'Failed to proxy image: ' + (error instanceof Error ? error.message : 'Unknown error') }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
