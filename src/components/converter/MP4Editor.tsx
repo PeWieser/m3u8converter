@@ -45,6 +45,7 @@ export function MP4Editor() {
     try {
       // Check if it's a TMDB URL - use proxy
       if (url.includes('image.tmdb.org')) {
+        console.log('Fetching TMDB image via proxy:', url);
         const { data, error } = await supabase.functions.invoke('tmdb-proxy', {
           body: { action: 'proxy-image', imageUrl: url }
         });
@@ -54,15 +55,36 @@ export function MP4Editor() {
           return null;
         }
         
-        // Convert ArrayBuffer to File
-        const blob = new Blob([data], { type: 'image/jpeg' });
-        return new File([blob], 'cover.jpg', { type: 'image/jpeg' });
+        // Data is now base64 encoded JSON response
+        if (data.error) {
+          console.warn('Proxy returned error:', data.error);
+          return null;
+        }
+        
+        // Decode base64 to binary
+        const base64 = data.data;
+        const contentType = data.contentType || 'image/jpeg';
+        
+        console.log('Received image, size:', data.size, 'bytes, type:', contentType);
+        
+        // Convert base64 to Uint8Array
+        const binaryString = atob(base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        // Create file with proper extension based on content type
+        const ext = contentType.includes('png') ? 'png' : 'jpg';
+        const blob = new Blob([bytes], { type: contentType });
+        return new File([blob], `cover.${ext}`, { type: contentType });
       } else {
         // Direct fetch for other URLs
         const response = await fetch(url);
         if (!response.ok) throw new Error('Failed to fetch image');
         const blob = await response.blob();
-        return new File([blob], 'cover.jpg', { type: blob.type || 'image/jpeg' });
+        const ext = blob.type.includes('png') ? 'png' : 'jpg';
+        return new File([blob], `cover.${ext}`, { type: blob.type || 'image/jpeg' });
       }
     } catch (error) {
       console.error('Failed to fetch cover:', error);

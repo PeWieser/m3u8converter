@@ -300,6 +300,7 @@ export function useFFmpeg() {
       await ffmpeg.exec(concatArgs);
 
       // Second pass: add metadata and thumbnail
+      addGlobalLog('info', 'Embedding metadata...', 'M3U8 Converter');
       addLog('Embedding metadata...');
       
       const metadataArgs: string[] = ['-i', outputFile];
@@ -308,12 +309,48 @@ export function useFFmpeg() {
       let hasCover = false;
       if (job.metadata.thumbnail) {
         try {
-          const thumbnailResponse = await fetch(job.metadata.thumbnail);
-          const thumbnailBlob = await thumbnailResponse.arrayBuffer();
-          await ffmpeg.writeFile('cover.jpg', new Uint8Array(thumbnailBlob));
+          addGlobalLog('info', `Fetching thumbnail from: ${job.metadata.thumbnail}`, 'M3U8 Converter');
+          
+          let thumbnailData: Uint8Array;
+          
+          // Check if it's a TMDB URL - needs proxy
+          if (job.metadata.thumbnail.includes('image.tmdb.org')) {
+            // Import supabase client dynamically to avoid circular dependency
+            const { supabase } = await import('@/integrations/supabase/client');
+            
+            const { data, error } = await supabase.functions.invoke('tmdb-proxy', {
+              body: { action: 'proxy-image', imageUrl: job.metadata.thumbnail }
+            });
+            
+            if (error || !data || data.error) {
+              throw new Error(error?.message || data?.error || 'Failed to proxy image');
+            }
+            
+            // Decode base64 to binary
+            const base64 = data.data;
+            const binaryString = atob(base64);
+            thumbnailData = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              thumbnailData[i] = binaryString.charCodeAt(i);
+            }
+            
+            addGlobalLog('success', `Thumbnail loaded via proxy: ${data.size} bytes`, 'M3U8 Converter');
+          } else {
+            // Direct fetch for other URLs
+            const thumbnailResponse = await fetch(job.metadata.thumbnail);
+            if (!thumbnailResponse.ok) {
+              throw new Error(`HTTP ${thumbnailResponse.status}`);
+            }
+            const thumbnailBlob = await thumbnailResponse.arrayBuffer();
+            thumbnailData = new Uint8Array(thumbnailBlob);
+            addGlobalLog('success', `Thumbnail loaded: ${thumbnailData.length} bytes`, 'M3U8 Converter');
+          }
+          
+          await ffmpeg.writeFile('cover.jpg', thumbnailData);
           metadataArgs.push('-i', 'cover.jpg');
           hasCover = true;
         } catch (e) {
+          addGlobalLog('warning', `Could not fetch thumbnail: ${e}`, 'M3U8 Converter');
           addLog('Warning: Could not fetch thumbnail');
         }
       }
