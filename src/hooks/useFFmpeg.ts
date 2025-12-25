@@ -3,6 +3,7 @@ import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import type { ConversionJob, M3U8Playlist } from '@/types/converter';
 import { parseM3U8, getBaseUrl } from '@/lib/m3u8-parser';
+import { addGlobalLog } from '@/components/converter/GlobalLogWindow';
 
 const FFMPEG_CORE_URL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
 
@@ -22,11 +23,13 @@ export function useFFmpeg() {
     if (loaded || loading) return;
     
     setLoading(true);
+    addGlobalLog('info', 'Loading FFmpeg engine...', 'M3U8 Converter');
     try {
       const ffmpeg = new FFmpeg();
       
       ffmpeg.on('log', ({ message }) => {
         console.log('[FFmpeg]', message);
+        addGlobalLog('ffmpeg', message, 'FFmpeg');
       });
 
       await ffmpeg.load({
@@ -36,9 +39,11 @@ export function useFFmpeg() {
 
       ffmpegRef.current = ffmpeg;
       setLoaded(true);
-    } catch (error) {
-      console.error('Failed to load FFmpeg:', error);
-      throw error;
+      addGlobalLog('success', 'FFmpeg loaded successfully', 'M3U8 Converter');
+    } catch (err) {
+      console.error('Failed to load FFmpeg:', err);
+      addGlobalLog('error', `Failed to load FFmpeg: ${err}`, 'M3U8 Converter');
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -375,9 +380,19 @@ export function useFFmpeg() {
       try { await ffmpeg.deleteFile('cover.jpg'); } catch {}
 
       const mimeType = job.audioOnly ? 'audio/mp3' : 'video/mp4';
-      // Properly handle Uint8Array from FFmpeg
-      const uint8Array = data instanceof Uint8Array ? data : new TextEncoder().encode(data as string);
-      const blob = new Blob([new Uint8Array(uint8Array).buffer as ArrayBuffer], { type: mimeType });
+      // Create blob properly - copy to standard ArrayBuffer
+      let blob: Blob;
+      if (data instanceof Uint8Array) {
+        const buffer = new ArrayBuffer(data.byteLength);
+        new Uint8Array(buffer).set(data);
+        blob = new Blob([buffer], { type: mimeType });
+      } else {
+        const encoder = new TextEncoder();
+        const encoded = encoder.encode(data as string);
+        const buffer = new ArrayBuffer(encoded.byteLength);
+        new Uint8Array(buffer).set(encoded);
+        blob = new Blob([buffer], { type: mimeType });
+      }
       
       const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
       addLog(`Conversion complete! Size: ${(blob.size / 1024 / 1024).toFixed(2)} MB in ${totalTime}s`);

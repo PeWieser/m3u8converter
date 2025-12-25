@@ -6,6 +6,7 @@ import { ConversionQueueItem } from '@/components/converter/ConversionQueueItem'
 import { ConversionHistory } from '@/components/converter/ConversionHistory';
 import { MP4Editor } from '@/components/converter/MP4Editor';
 import { OptimizerSettings } from '@/components/converter/OptimizerSettings';
+import { GlobalLogWindow, useGlobalLogs } from '@/components/converter/GlobalLogWindow';
 import { useConversionQueue } from '@/hooks/useConversionQueue';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,7 @@ const Index = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const { logs, clearLogs } = useGlobalLogs();
   const {
     jobs,
     history,
@@ -457,13 +459,16 @@ const Index = () => {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-border/30 py-8">
+      <footer className="border-t border-border/30 py-8 pb-20">
         <div className="container mx-auto px-4 text-center">
           <p className="text-sm text-muted-foreground">
             Built with FFmpeg.wasm • All processing happens in your browser
           </p>
         </div>
       </footer>
+
+      {/* Global Log Window */}
+      <GlobalLogWindow logs={logs} onClear={clearLogs} />
     </div>
   );
 };
