@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileText, User, Image, ChevronDown, ChevronUp, Loader2, Film, Tv } from 'lucide-react';
+import { FileText, User, Image, ChevronDown, ChevronUp, Loader2, Film, Tv, Calendar, Tag } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { ConversionMetadata } from '@/types/converter';
 import { useTmdbSearch, type TmdbResult, type TmdbDetails, type TmdbSeason, type TmdbEpisode } from '@/hooks/useTmdbSearch';
@@ -67,6 +68,11 @@ export function MetadataEditor({
         title: details.title,
         author: details.director || details.creators?.join(', ') || '',
         thumbnail: details.poster || '',
+        show: details.type === 'tv' ? details.title : '',
+        date: details.year?.toString() || '',
+        genre: details.genres?.join(', ') || '',
+        description: details.overview || '',
+        director: details.director || '',
       });
 
       onTmdbSelect?.(details.id, details.type);
@@ -94,6 +100,7 @@ export function MetadataEditor({
     setSelectedSeason(season);
     setSelectedEpisode(null);
     setEpisodes([]);
+    onChange({ season: seasonNumber });
     
     if (selectedTmdb && selectedTmdb.type === 'tv') {
       setLoadingEpisodes(true);
@@ -106,12 +113,12 @@ export function MetadataEditor({
   const handleEpisodeChange = (episodeNumber: string) => {
     const episode = parseInt(episodeNumber, 10);
     setSelectedEpisode(episode);
+    onChange({ episode: episodeNumber });
     
     const ep = episodes.find(e => e.episodeNumber === episode);
     if (ep && selectedSeason !== null) {
-      // Update title to include episode info
-      const episodeTitle = `${selectedTmdb?.title} - S${String(selectedSeason).padStart(2, '0')}E${String(episode).padStart(2, '0')} - ${ep.name}`;
-      onChange({ title: episodeTitle });
+      // Metadaten-Titel ist nur der Episodenname (Dateiname enthält volles Format)
+      onChange({ title: ep.name, episode: episodeNumber });
       onSeasonEpisodeChange?.(selectedSeason, episode);
     }
   };
@@ -136,6 +143,7 @@ export function MetadataEditor({
       
       {isExpanded && (
         <div className="px-4 pb-4 space-y-4 border-t border-border/30">
+          {/* Title with TMDB Search */}
           <div className="pt-4 space-y-2 relative" ref={dropdownRef}>
             <Label htmlFor="title" className="flex items-center gap-2 text-xs text-muted-foreground">
               <FileText className="h-3 w-3" />
@@ -202,6 +210,22 @@ export function MetadataEditor({
             )}
           </div>
 
+          {/* Show Name (for TV) */}
+          {(selectedTmdb?.type === 'tv' || metadata.show) && (
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Tv className="h-3 w-3" />
+                Serienname
+              </Label>
+              <Input
+                value={metadata.show || ''}
+                onChange={(e) => onChange({ show: e.target.value })}
+                placeholder="Name der Serie"
+                className="bg-secondary/50 border-border/50"
+              />
+            </div>
+          )}
+
           {/* Season/Episode Selection for TV Shows */}
           {seasons.length > 0 && (
             <div className="grid grid-cols-2 gap-3">
@@ -250,6 +274,7 @@ export function MetadataEditor({
             </div>
           )}
           
+          {/* Author / Director */}
           <div className="space-y-2">
             <Label htmlFor="author" className="flex items-center gap-2 text-xs text-muted-foreground">
               <User className="h-3 w-3" />
@@ -257,13 +282,53 @@ export function MetadataEditor({
             </Label>
             <Input
               id="author"
-              value={metadata.author}
-              onChange={(e) => onChange({ author: e.target.value })}
+              value={metadata.author || metadata.director || ''}
+              onChange={(e) => onChange({ author: e.target.value, director: e.target.value })}
               placeholder="Director or creator name"
               className="bg-secondary/50 border-border/50"
             />
           </div>
+
+          {/* Year */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Calendar className="h-3 w-3" />
+              Jahr
+            </Label>
+            <Input
+              value={metadata.date || ''}
+              onChange={(e) => onChange({ date: e.target.value })}
+              placeholder="z.B. 2024"
+              className="bg-secondary/50 border-border/50"
+            />
+          </div>
+
+          {/* Genre */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Tag className="h-3 w-3" />
+              Genre
+            </Label>
+            <Input
+              value={metadata.genre || ''}
+              onChange={(e) => onChange({ genre: e.target.value })}
+              placeholder="z.B. Action, Drama"
+              className="bg-secondary/50 border-border/50"
+            />
+          </div>
+
+          {/* Description */}
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">Beschreibung</Label>
+            <Textarea
+              value={metadata.description || ''}
+              onChange={(e) => onChange({ description: e.target.value })}
+              placeholder="Kurze Beschreibung..."
+              className="bg-secondary/50 border-border/50 min-h-[60px]"
+            />
+          </div>
           
+          {/* Thumbnail URL */}
           <div className="space-y-2">
             <Label htmlFor="thumbnail" className="flex items-center gap-2 text-xs text-muted-foreground">
               <Image className="h-3 w-3" />
