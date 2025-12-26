@@ -111,11 +111,15 @@ export function useFFmpegEditor() {
       }
 
       // Add metadata
+      // Für Serien: title = Episodenname, show = Serienname
+      // Für Filme: title = Filmname
       if (metadata.title) {
         args.push('-metadata', `title=${metadata.title}`);
       }
       if (metadata.show) {
         args.push('-metadata', `show=${metadata.show}`);
+        // Für Serien media_type=10 hinzufügen (TV Show)
+        args.push('-metadata', 'media_type=10');
       }
       if (metadata.season) {
         args.push('-metadata', `season_number=${metadata.season}`);

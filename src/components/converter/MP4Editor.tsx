@@ -194,7 +194,8 @@ export function MP4Editor() {
       setMetadata(prev => ({
         ...prev,
         episode: episodeNumber,
-        title: `${selectedTmdb?.title} - S${prev.season?.padStart(2, '0')}E${episodeNumber.padStart(2, '0')} - ${ep.name}`,
+        // Metadaten-Titel ist nur der Episodenname, Dateiname enthält volles Format
+        title: ep.name,
         description: ep.overview || prev.description,
       }));
     }
@@ -256,13 +257,21 @@ export function MP4Editor() {
   const handleDownload = useCallback(() => {
     if (!outputBlob) return;
     
+    // Dateiname: Für Serien "Show - S01E01 - Episodenname", für Filme nur Titel
+    let filename = metadata.title || 'output';
+    if (metadata.show && metadata.season && metadata.episode) {
+      const seasonPadded = metadata.season.padStart(2, '0');
+      const episodePadded = metadata.episode.padStart(2, '0');
+      filename = `${metadata.show} - S${seasonPadded}E${episodePadded} - ${metadata.title}`;
+    }
+    
     const url = URL.createObjectURL(outputBlob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${metadata.title || 'output'}.mp4`;
+    a.download = `${filename}.mp4`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [outputBlob, metadata.title]);
+  }, [outputBlob, metadata]);
 
   const handleReset = useCallback(() => {
     setVideoFile(null);
