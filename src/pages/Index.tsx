@@ -220,6 +220,28 @@ const Index = () => {
 
   return (
     <div className="min-h-screen">
+      {/* Zurück Button zu mankind.lol */}
+      <div style={{ position: 'absolute', top: '1rem', left: '1rem', zIndex: 50 }}>
+        <a 
+          href="https://mankind.lol" 
+          style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '0.5rem', 
+            textDecoration: 'none', 
+            color: '#64748b', 
+            fontSize: '0.875rem',
+            fontWeight: '500' 
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.color = '#F97316'}
+          onMouseLeave={(e) => e.currentTarget.style.color = '#64748b'}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 12H5M12 19l-7-7 7-7"/>
+          </svg>
+          Zurück
+        </a>
+      </div>
       {/* Hero Section */}
       <header className="relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-b from-primary/5 via-transparent to-transparent" />
