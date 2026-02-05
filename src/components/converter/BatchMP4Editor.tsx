@@ -1,21 +1,32 @@
-import { useState, useCallback } from 'react';
-import { Upload, FileVideo, Download, Loader2, Trash2, Play, CheckCircle, AlertCircle, FolderUp } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { Upload, FileVideo, Image, Download, Loader2, Trash2, Play, CheckCircle, AlertCircle, FolderUp, Film, Tv, Search, ChevronDown, ChevronUp, Link } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/hooks/use-toast';
 import { useFFmpegEditor } from '@/hooks/useFFmpegEditor';
+import { useTmdbSearch, type TmdbResult } from '@/hooks/useTmdbSearch';
 import type { ConversionMetadata } from '@/types/converter';
+import { supabase } from '@/integrations/supabase/client';
 import JSZip from 'jszip';
 
 interface BatchFile {
   id: string;
   file: File;
   metadata: ConversionMetadata;
+  coverFile?: File;
+  coverPreview?: string;
+  coverUrl?: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
   progress: number;
   outputBlob?: Blob;
   error?: string;
+  expanded?: boolean;
+  seasons?: any[];
+  episodes?: any[];
+  selectedTmdb?: any;
 }
 
 export function BatchMP4Editor() {
@@ -24,8 +35,49 @@ export function BatchMP4Editor() {
   const [isProcessingBatch, setIsProcessingBatch] = useState(false);
   
   const { load, loaded, loading: ffmpegLoading, editMetadata } = useFFmpegEditor();
+  const tmdbHook = useTmdbSearch();
 
-  const handleFilesSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  // Fetch cover image from URL
+  const fetchCoverFromUrl = useCallback(async (url: string): Promise<File | null> => {
+    if (!url) return null;
+    
+    try {
+      if (url.includes('image.tmdb.org')) {
+        const { data, error } = await supabase.functions.invoke('tmdb-proxy', {
+          body: { action: 'proxy-image', imageUrl: url }
+        });
+        
+        if (error || !data || data.error) {
+          console.warn('Failed to proxy TMDB image:', error || data?.error);
+          return null;
+        }
+        
+        const base64 = data.data;
+        const contentType = data.contentType || 'image/jpeg';
+        
+        const binaryString = atob(base64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        const ext = contentType.includes('png') ? 'png' : 'jpg';
+        const blob = new Blob([bytes], { type: contentType });
+        return new File([blob], `cover.${ext}`, { type: contentType });
+      } else {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch image');
+        const blob = await response.blob();
+        const ext = blob.type.includes('png') ? 'png' : 'jpg';
+        return new File([blob], `cover.${ext}`, { type: blob.type || 'image/jpeg' });
+      }
+    } catch (error) {
+      console.error('Failed to fetch cover:', error);
+      return null;
+    }
+  }, []);
+
+  const handleFilesSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
     const mp4Files = selectedFiles.filter(f => f.type.includes('video/mp4') || f.name.endsWith('.mp4'));
     
@@ -47,6 +99,7 @@ export function BatchMP4Editor() {
       },
       status: 'pending',
       progress: 0,
+      expanded: true, // Expand first to show TMDB search
     }));
 
     setFiles(prev => [...prev, ...newFiles]);
@@ -79,6 +132,7 @@ export function BatchMP4Editor() {
       },
       status: 'pending',
       progress: 0,
+      expanded: true,
     }));
 
     setFiles(prev => [...prev, ...newFiles]);
@@ -123,6 +177,137 @@ export function BatchMP4Editor() {
     setSelectedIds(new Set());
   }, []);
 
+  const toggleExpand = useCallback((id: string) => {
+    setFiles(prev => prev.map(f => 
+      f.id === id ? { ...f, expanded: !f.expanded } : f
+    ));
+  }, []);
+
+  const updateFileMetadata = useCallback((id: string, updates: Partial<ConversionMetadata>) => {
+    setFiles(prev => prev.map(f => 
+      f.id === id ? { ...f, metadata: { ...f.metadata, ...updates } } : f
+    ));
+  }, []);
+
+  const handleTmdbSearch = useCallback(async (fileId: string, query: string) => {
+    if (query.length < 2) return;
+    
+    await tmdbHook.search(query);
+  }, [tmdbHook]);
+
+  const handleSelectTmdbResult = useCallback(async (fileId: string, result: TmdbResult) => {
+    const details = await tmdbHook.fetchDetails(result.id, result.type);
+    
+    if (details) {
+      // Fetch cover
+      let coverFile: File | undefined;
+      let coverPreview: string | undefined;
+      let coverUrl: string | undefined;
+      
+      if (details.poster) {
+        const file = await fetchCoverFromUrl(details.poster);
+        if (file) {
+          coverFile = file;
+          coverPreview = details.poster;
+          coverUrl = details.poster;
+        }
+      }
+      
+      setFiles(prev => prev.map(f => 
+        f.id === fileId ? { 
+          ...f, 
+          metadata: {
+            ...f.metadata,
+            title: details.title,
+            show: details.type === 'tv' ? details.title : '',
+            director: details.director || '',
+            author: details.director || details.creators?.join(', ') || '',
+            date: details.year?.toString() || '',
+            genre: details.genres?.join(', ') || '',
+            description: details.overview || '',
+            thumbnail: details.poster || '',
+          },
+          coverFile,
+          coverPreview,
+          coverUrl,
+          selectedTmdb: details,
+          seasons: details.type === 'tv' ? details.seasons : [],
+          episodes: [],
+        } : f
+      ));
+    }
+    
+    tmdbHook.clearResults();
+  }, [tmdbHook, fetchCoverFromUrl]);
+
+  const handleSeasonChange = useCallback(async (fileId: string, seasonNumber: string) => {
+    const file = files.find(f => f.id === fileId);
+    if (!file?.selectedTmdb) return;
+    
+    const eps = await tmdbHook.fetchSeasonEpisodes(file.selectedTmdb.id, parseInt(seasonNumber, 10));
+    
+    setFiles(prev => prev.map(f => 
+      f.id === fileId ? { 
+        ...f, 
+        metadata: { ...f.metadata, season: seasonNumber },
+        episodes: eps,
+      } : f
+    ));
+  }, [files, tmdbHook]);
+
+  const handleEpisodeChange = useCallback((fileId: string, episodeNumber: string) => {
+    const file = files.find(f => f.id === fileId);
+    if (!file?.episodes) return;
+    
+    const ep = file.episodes.find((e: any) => e.episodeNumber === parseInt(episodeNumber, 10));
+    if (ep) {
+      setFiles(prev => prev.map(f => 
+        f.id === fileId ? { 
+          ...f, 
+          metadata: { 
+            ...f.metadata, 
+            episode: episodeNumber,
+            title: ep.name,
+            description: ep.overview || f.metadata.description,
+          }
+        } : f
+      ));
+    }
+  }, [files]);
+
+  const handleCoverUrlChange = useCallback(async (fileId: string, url: string) => {
+    if (!url) {
+      setFiles(prev => prev.map(f => 
+        f.id === fileId ? { ...f, coverFile: undefined, coverPreview: undefined, coverUrl: '' } : f
+      ));
+      return;
+    }
+    
+    setFiles(prev => prev.map(f => 
+      f.id === fileId ? { ...f, coverUrl: url, coverPreview: url } : f
+    ));
+    
+    const file = await fetchCoverFromUrl(url);
+    if (file) {
+      setFiles(prev => prev.map(f => 
+        f.id === fileId ? { ...f, coverFile: file } : f
+      ));
+    }
+  }, [fetchCoverFromUrl]);
+
+  const handleCoverFileSelect = useCallback((fileId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type.includes('image/')) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setFiles(prev => prev.map(f => 
+          f.id === fileId ? { ...f, coverFile: file, coverPreview: reader.result as string } : f
+        ));
+      };
+      reader.readAsDataURL(file);
+    }
+  }, []);
+
   const processBatch = useCallback(async () => {
     const pendingFiles = files.filter(f => f.status === 'pending');
     if (pendingFiles.length === 0) return;
@@ -139,7 +324,6 @@ export function BatchMP4Editor() {
       }
 
       for (const batchFile of pendingFiles) {
-        // Update status to processing
         setFiles(prev => prev.map(f => 
           f.id === batchFile.id ? { ...f, status: 'processing' as const, progress: 0 } : f
         ));
@@ -148,7 +332,7 @@ export function BatchMP4Editor() {
           const blob = await editMetadata(
             batchFile.file, 
             batchFile.metadata, 
-            undefined, // No cover for batch
+            batchFile.coverFile,
             (progress) => {
               setFiles(prev => prev.map(f => 
                 f.id === batchFile.id ? { ...f, progress } : f
@@ -175,17 +359,23 @@ export function BatchMP4Editor() {
         }
       }
 
-      const completedCount = files.filter(f => f.status === 'completed').length + 
-        pendingFiles.filter(f => !files.find(bf => bf.id === f.id && bf.status === 'error')).length;
-      
       toast({
         title: 'Batch-Verarbeitung abgeschlossen',
-        description: `${completedCount} Dateien erfolgreich verarbeitet`,
       });
     } finally {
       setIsProcessingBatch(false);
     }
   }, [files, loaded, load, editMetadata]);
+
+  const getFilename = useCallback((file: BatchFile) => {
+    const meta = file.metadata;
+    if (meta.show && meta.season && meta.episode) {
+      const seasonPadded = meta.season.padStart(2, '0');
+      const episodePadded = meta.episode.padStart(2, '0');
+      return `${meta.show} - S${seasonPadded}E${episodePadded} - ${meta.title}`;
+    }
+    return meta.title || file.file.name.replace(/\.mp4$/i, '');
+  }, []);
 
   const downloadSelected = useCallback(async () => {
     const selectedFiles = files.filter(f => selectedIds.has(f.id) && f.outputBlob);
@@ -200,18 +390,16 @@ export function BatchMP4Editor() {
     }
 
     if (selectedFiles.length === 1) {
-      // Single file download
       const file = selectedFiles[0];
       if (file.outputBlob) {
         const url = URL.createObjectURL(file.outputBlob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${file.metadata.title || file.file.name}.mp4`;
+        a.download = `${getFilename(file)}.mp4`;
         a.click();
         URL.revokeObjectURL(url);
       }
     } else {
-      // ZIP download
       toast({
         title: 'ZIP wird erstellt...',
         description: 'Bitte warten...',
@@ -221,7 +409,7 @@ export function BatchMP4Editor() {
       
       for (const file of selectedFiles) {
         if (file.outputBlob) {
-          const filename = `${file.metadata.title || file.file.name}.mp4`;
+          const filename = `${getFilename(file)}.mp4`;
           zip.file(filename, file.outputBlob);
         }
       }
@@ -239,7 +427,7 @@ export function BatchMP4Editor() {
         description: `${selectedFiles.length} Dateien als ZIP`,
       });
     }
-  }, [files, selectedIds]);
+  }, [files, selectedIds, getFilename]);
 
   const downloadAll = useCallback(async () => {
     const completedFiles = files.filter(f => f.status === 'completed' && f.outputBlob);
@@ -252,7 +440,7 @@ export function BatchMP4Editor() {
         const url = URL.createObjectURL(file.outputBlob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${file.metadata.title || file.file.name}.mp4`;
+        a.download = `${getFilename(file)}.mp4`;
         a.click();
         URL.revokeObjectURL(url);
       }
@@ -266,7 +454,7 @@ export function BatchMP4Editor() {
       
       for (const file of completedFiles) {
         if (file.outputBlob) {
-          const filename = `${file.metadata.title || file.file.name}.mp4`;
+          const filename = `${getFilename(file)}.mp4`;
           zip.file(filename, file.outputBlob);
         }
       }
@@ -284,7 +472,7 @@ export function BatchMP4Editor() {
         description: `${completedFiles.length} Dateien als ZIP`,
       });
     }
-  }, [files]);
+  }, [files, getFilename]);
 
   const pendingFiles = files.filter(f => f.status === 'pending');
   const processingFiles = files.filter(f => f.status === 'processing');
@@ -309,7 +497,7 @@ export function BatchMP4Editor() {
         >
           <Upload className="h-8 w-8 text-muted-foreground mb-2" />
           <span className="text-sm text-muted-foreground">Mehrere MP4-Dateien hierher ziehen oder klicken</span>
-          <span className="text-xs text-muted-foreground mt-1">(Nur Metadaten, ohne Cover)</span>
+          <span className="text-xs text-muted-foreground mt-1">(Mit TMDB-Suche und Cover-Support)</span>
           <input
             type="file"
             accept="video/mp4,.mp4"
@@ -360,64 +548,235 @@ export function BatchMP4Editor() {
             </div>
           </div>
 
-          {/* File Items */}
-          <div className="space-y-2 max-h-80 overflow-y-auto">
+          {/* File Items - List View */}
+          <div className="space-y-3 max-h-[600px] overflow-y-auto">
             {files.map((file) => (
               <div 
                 key={file.id} 
-                className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
-                  file.status === 'completed' ? 'bg-green-500/10' : 
-                  file.status === 'error' ? 'bg-destructive/10' : 
-                  file.status === 'processing' ? 'bg-primary/10' : 
-                  'bg-secondary/30'
+                className={`rounded-lg border transition-colors ${
+                  file.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 
+                  file.status === 'error' ? 'border-destructive/30 bg-destructive/5' : 
+                  file.status === 'processing' ? 'border-primary/30 bg-primary/5' : 
+                  'border-border/30 bg-secondary/20'
                 }`}
               >
-                {file.status === 'completed' && (
-                  <Checkbox
-                    checked={selectedIds.has(file.id)}
-                    onCheckedChange={() => toggleSelection(file.id)}
-                  />
-                )}
-                
-                <div className={`
-                  flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center
-                  ${file.status === 'completed' ? 'bg-green-500/20' : 
-                    file.status === 'error' ? 'bg-destructive/20' : 
-                    file.status === 'processing' ? 'bg-primary/20' :
-                    'bg-secondary/50'}
-                `}>
-                  {file.status === 'processing' ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  ) : file.status === 'completed' ? (
-                    <CheckCircle className="h-4 w-4 text-green-400" />
-                  ) : file.status === 'error' ? (
-                    <AlertCircle className="h-4 w-4 text-destructive" />
-                  ) : (
-                    <FileVideo className="h-4 w-4 text-muted-foreground" />
+                {/* Header Row */}
+                <div 
+                  className="flex items-center gap-3 p-3 cursor-pointer"
+                  onClick={() => file.status === 'pending' && toggleExpand(file.id)}
+                >
+                  {file.status === 'completed' && (
+                    <Checkbox
+                      checked={selectedIds.has(file.id)}
+                      onCheckedChange={() => toggleSelection(file.id)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
                   )}
+                  
+                  {/* Cover Preview */}
+                  <div className="w-12 h-16 rounded overflow-hidden flex-shrink-0 bg-secondary/50 flex items-center justify-center">
+                    {file.coverPreview ? (
+                      <img src={file.coverPreview} alt="Cover" className="w-full h-full object-cover" />
+                    ) : (
+                      <Image className="h-5 w-5 text-muted-foreground" />
+                    )}
+                  </div>
+                  
+                  <div className={`
+                    flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center
+                    ${file.status === 'completed' ? 'bg-green-500/20' : 
+                      file.status === 'error' ? 'bg-destructive/20' : 
+                      file.status === 'processing' ? 'bg-primary/20' :
+                      'bg-secondary/50'}
+                  `}>
+                    {file.status === 'processing' ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    ) : file.status === 'completed' ? (
+                      <CheckCircle className="h-4 w-4 text-green-400" />
+                    ) : file.status === 'error' ? (
+                      <AlertCircle className="h-4 w-4 text-destructive" />
+                    ) : (
+                      <FileVideo className="h-4 w-4 text-muted-foreground" />
+                    )}
+                  </div>
+                  
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {file.metadata.show && file.metadata.season && file.metadata.episode 
+                        ? `${file.metadata.show} - S${file.metadata.season.padStart(2,'0')}E${file.metadata.episode.padStart(2,'0')} - ${file.metadata.title}`
+                        : file.metadata.title || file.file.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {file.file.name} • {(file.file.size / 1024 / 1024).toFixed(2)} MB
+                      {file.status === 'processing' && ` • ${file.progress}%`}
+                      {file.status === 'error' && ` • ${file.error}`}
+                    </p>
+                    {file.status === 'processing' && (
+                      <Progress value={file.progress} className="h-1 mt-1" />
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    {file.status === 'pending' && !isProcessingBatch && (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => { e.stopPropagation(); toggleExpand(file.id); }}
+                          className="flex-shrink-0"
+                        >
+                          {file.expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => { e.stopPropagation(); removeFile(file.id); }}
+                          className="flex-shrink-0"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </>
+                    )}
+                  </div>
                 </div>
                 
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{file.file.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {(file.file.size / 1024 / 1024).toFixed(2)} MB
-                    {file.status === 'processing' && ` • ${file.progress}%`}
-                    {file.status === 'error' && ` • ${file.error}`}
-                  </p>
-                  {file.status === 'processing' && (
-                    <Progress value={file.progress} className="h-1 mt-1" />
-                  )}
-                </div>
-                
-                {file.status === 'pending' && !isProcessingBatch && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => removeFile(file.id)}
-                    className="flex-shrink-0"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                {/* Expanded Content */}
+                {file.expanded && file.status === 'pending' && (
+                  <div className="p-4 pt-0 space-y-4 border-t border-border/20 mt-2">
+                    {/* TMDB Search */}
+                    <div className="space-y-2 relative">
+                      <Label className="text-xs text-muted-foreground flex items-center gap-2">
+                        <Search className="h-3 w-3" />
+                        TMDB-Suche
+                      </Label>
+                      <div className="flex gap-2">
+                        <Input
+                          value={file.metadata.title}
+                          onChange={(e) => {
+                            updateFileMetadata(file.id, { title: e.target.value });
+                            handleTmdbSearch(file.id, e.target.value);
+                          }}
+                          placeholder="Titel eingeben..."
+                          className="bg-secondary/50 border-border/50"
+                        />
+                      </div>
+                      
+                      {/* TMDB Results Dropdown */}
+                      {tmdbHook.results.length > 0 && (
+                        <div className="absolute z-50 left-0 right-0 top-full mt-1 bg-background border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                          {tmdbHook.results.map((result) => (
+                            <button
+                              key={`${result.type}-${result.id}`}
+                              onClick={() => handleSelectTmdbResult(file.id, result)}
+                              className="w-full flex items-center gap-3 p-2 hover:bg-secondary/50 transition-colors text-left"
+                            >
+                              {result.poster ? (
+                                <img src={result.poster} alt={result.title} className="w-8 h-12 object-cover rounded" />
+                              ) : (
+                                <div className="w-8 h-12 bg-secondary/50 rounded flex items-center justify-center">
+                                  {result.type === 'tv' ? <Tv className="h-4 w-4" /> : <Film className="h-4 w-4" />}
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-sm truncate">{result.title}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {result.year} • {result.type === 'tv' ? 'Serie' : 'Film'}
+                                </p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Season/Episode Selection for TV */}
+                    {file.seasons && file.seasons.length > 0 && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Staffel</Label>
+                          <select
+                            value={file.metadata.season || ''}
+                            onChange={(e) => handleSeasonChange(file.id, e.target.value)}
+                            className="w-full h-9 rounded-md border border-border/50 bg-secondary/50 px-3 text-sm"
+                          >
+                            <option value="">Staffel wählen</option>
+                            {file.seasons.map((s: any) => (
+                              <option key={s.seasonNumber} value={s.seasonNumber.toString()}>
+                                {s.name} ({s.episodeCount} Ep.)
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Episode</Label>
+                          <select
+                            value={file.metadata.episode || ''}
+                            onChange={(e) => handleEpisodeChange(file.id, e.target.value)}
+                            className="w-full h-9 rounded-md border border-border/50 bg-secondary/50 px-3 text-sm"
+                            disabled={!file.metadata.season}
+                          >
+                            <option value="">Episode wählen</option>
+                            {(file.episodes || []).map((ep: any) => (
+                              <option key={ep.episodeNumber} value={ep.episodeNumber.toString()}>
+                                E{String(ep.episodeNumber).padStart(2, '0')}: {ep.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Cover URL */}
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground flex items-center gap-2">
+                        <Link className="h-3 w-3" />
+                        Cover-URL (optional)
+                      </Label>
+                      <Input
+                        value={file.coverUrl || ''}
+                        onChange={(e) => handleCoverUrlChange(file.id, e.target.value)}
+                        placeholder="https://..."
+                        className="bg-secondary/50 border-border/50"
+                      />
+                    </div>
+
+                    {/* Cover File Upload */}
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Oder Cover-Datei hochladen</Label>
+                      <label className="flex items-center justify-center w-full h-12 border border-dashed border-border/50 rounded-lg cursor-pointer hover:bg-secondary/30 transition-colors">
+                        <Upload className="h-4 w-4 text-muted-foreground mr-2" />
+                        <span className="text-xs text-muted-foreground">Cover-Bild wählen</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => handleCoverFileSelect(file.id, e)}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+
+                    {/* Additional Metadata */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Jahr</Label>
+                        <Input
+                          value={file.metadata.date || ''}
+                          onChange={(e) => updateFileMetadata(file.id, { date: e.target.value })}
+                          placeholder="z.B. 2024"
+                          className="bg-secondary/50 border-border/50 h-9"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Genre</Label>
+                        <Input
+                          value={file.metadata.genre || ''}
+                          onChange={(e) => updateFileMetadata(file.id, { genre: e.target.value })}
+                          placeholder="z.B. Drama"
+                          className="bg-secondary/50 border-border/50 h-9"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             ))}
