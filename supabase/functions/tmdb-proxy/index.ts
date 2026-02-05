@@ -148,8 +148,16 @@ serve(async (req) => {
         const imageData = await imgResponse.arrayBuffer();
         const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
         
-        // Convert to base64 for JSON transport
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(imageData)));
+        // Convert to base64 using chunks to avoid stack overflow for large images
+        const uint8Array = new Uint8Array(imageData);
+        const CHUNK_SIZE = 32768; // 32KB chunks
+        let base64 = '';
+        
+        for (let i = 0; i < uint8Array.length; i += CHUNK_SIZE) {
+          const chunk = uint8Array.slice(i, Math.min(i + CHUNK_SIZE, uint8Array.length));
+          base64 += String.fromCharCode(...chunk);
+        }
+        base64 = btoa(base64);
         
         console.log('Image fetched successfully, size:', imageData.byteLength, 'bytes, type:', contentType);
         

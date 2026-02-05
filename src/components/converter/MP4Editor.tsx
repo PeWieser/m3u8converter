@@ -104,13 +104,20 @@ export function MP4Editor() {
         return;
       }
       setVideoFile(file);
+      const baseTitle = file.name.replace(/\.mp4$/i, '');
       setMetadata(prev => ({
         ...prev,
-        title: file.name.replace(/\.mp4$/i, ''),
+        title: baseTitle,
       }));
       setOutputBlob(null);
+      
+      // Automatisch TMDB-Suche starten basierend auf Dateinamen
+      if (baseTitle.length >= 2) {
+        search(baseTitle);
+        setShowTmdbDropdown(true);
+      }
     }
-  }, []);
+  }, [search]);
 
   const handleCoverSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
