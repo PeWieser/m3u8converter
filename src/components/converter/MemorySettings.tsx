@@ -67,9 +67,9 @@ export function MemorySettings({ settings, onChange, fileSize, warning }: Memory
           <div className="px-4 pb-4 space-y-4 border-t border-border/50">
             {/* Warning message */}
             {warning && (
-              <div className="flex gap-3 p-3 mt-4 rounded-lg bg-destructive/10 border border-destructive/30">
-                <AlertTriangle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-destructive">{warning}</p>
+              <div className="flex gap-3 p-3 mt-4 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-amber-600 dark:text-amber-400">{warning}</p>
               </div>
             )}
             
