@@ -24,12 +24,12 @@ export function FileDropzone({ onFileDrop, onUrlSubmit, isDragging, setIsDraggin
     setIsDragging(false);
     
     const files = Array.from(e.dataTransfer.files);
-    const m3u8Files = files.filter(f => 
-      f.name.endsWith('.m3u8') || f.name.endsWith('.m3u')
+    const validFiles = files.filter(f => 
+      f.name.endsWith('.m3u8') || f.name.endsWith('.m3u') || f.name.endsWith('.ts')
     );
     
-    if (m3u8Files.length > 0) {
-      onFileDrop(m3u8Files);
+    if (validFiles.length > 0) {
+      onFileDrop(validFiles);
     }
   }, [onFileDrop, setIsDragging]);
 
@@ -71,7 +71,7 @@ export function FileDropzone({ onFileDrop, onUrlSubmit, isDragging, setIsDraggin
         
         <input
           type="file"
-          accept=".m3u8,.m3u"
+          accept=".m3u8,.m3u,.ts"
           multiple
           onChange={handleFileSelect}
           className="absolute inset-0 cursor-pointer opacity-0"
@@ -80,7 +80,7 @@ export function FileDropzone({ onFileDrop, onUrlSubmit, isDragging, setIsDraggin
         <div className="mt-4 flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1">
             <Files className="h-3 w-3" />
-            Supports multiple .m3u8 and .m3u files
+            Unterstützt: .m3u8, .m3u, .ts Dateien
           </span>
         </div>
       </div>
