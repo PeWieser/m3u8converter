@@ -6,6 +6,7 @@ import { ConversionQueueItem } from '@/components/converter/ConversionQueueItem'
 import { ConversionHistory } from '@/components/converter/ConversionHistory';
 import { MP4Editor } from '@/components/converter/MP4Editor';
 import { BatchMP4Editor } from '@/components/converter/BatchMP4Editor';
+import { LocalBridge } from '@/components/converter/LocalBridge';
 import { OptimizerSettings } from '@/components/converter/OptimizerSettings';
 import { GlobalLogWindow, useGlobalLogs } from '@/components/converter/GlobalLogWindow';
 import { useConversionQueue } from '@/hooks/useConversionQueue';
@@ -474,7 +475,8 @@ const Index = () => {
               <ConversionHistory history={history} onClear={clearHistory} />
             </TabsContent>
 
-            <TabsContent value="editor" className="mt-0">
+            <TabsContent value="editor" className="mt-0 space-y-6">
+              <LocalBridge />
               <MP4Editor />
               <BatchMP4Editor />
             </TabsContent>
