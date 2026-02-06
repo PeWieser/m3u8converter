@@ -4,7 +4,9 @@ import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import type { ConversionMetadata } from '@/types/converter';
 import { addGlobalLog } from '@/components/converter/GlobalLogWindow';
 import { 
-  readFileInChunks, 
+  readFileInChunks,
+  streamLargeFileToFFmpeg,
+  formatFileSize,
   loadMemorySettings, 
   type MemorySettings,
   type ChunkProgress 
@@ -92,19 +94,46 @@ export function useFFmpegEditor() {
       ? Math.min(settings.chunkSizeMB, 32) 
       : settings.chunkSizeMB;
 
+    // Threshold for using streaming mode (files that might exceed buffer limits)
+    const STREAMING_THRESHOLD = 1.5 * 1024 * 1024 * 1024; // 1.5GB
+    const useStreamingMode = videoFile.size > STREAMING_THRESHOLD;
+
     try {
       // Write input video to virtual filesystem
       const inputFileName = 'input.mp4';
       const outputFileName = 'output.mp4';
       
-      const fileSizeMB = (videoFile.size / 1024 / 1024).toFixed(2);
-      const fileSizeGB = (videoFile.size / 1024 / 1024 / 1024).toFixed(2);
-      const sizeDisplay = videoFile.size > 1024 * 1024 * 1024 
-        ? `${fileSizeGB} GB` 
-        : `${fileSizeMB} MB`;
+      const sizeDisplay = formatFileSize(videoFile.size);
 
-      if (useChunkedReading) {
-        addGlobalLog('info', `Using chunked reading (${effectiveChunkSize}MB chunks) for large file: ${sizeDisplay}`, 'MP4 Editor');
+      if (useStreamingMode) {
+        // For very large files, use the streaming approach
+        addGlobalLog('warning', `Sehr große Datei erkannt (${sizeDisplay}). Verwende Streaming-Modus...`, 'MP4 Editor');
+        
+        try {
+          await streamLargeFileToFFmpeg(
+            videoFile,
+            ffmpeg,
+            inputFileName,
+            effectiveChunkSize,
+            (chunkProgress) => {
+              setReadingProgress(chunkProgress);
+              if (chunkProgress.chunkIndex % 5 === 0 || chunkProgress.chunkIndex === chunkProgress.totalChunks) {
+                addGlobalLog(
+                  'warning', 
+                  `Streaming: ${chunkProgress.percent}% (Chunk ${chunkProgress.chunkIndex}/${chunkProgress.totalChunks})`, 
+                  'MP4 Editor'
+                );
+              }
+            }
+          );
+          addGlobalLog('success', 'Video erfolgreich in FFmpeg geladen', 'MP4 Editor');
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          addGlobalLog('error', errorMsg, 'MP4 Editor');
+          throw err;
+        }
+      } else if (useChunkedReading) {
+        addGlobalLog('warning', `Verwende Chunk-Reading (${effectiveChunkSize}MB Chunks) für große Datei: ${sizeDisplay}`, 'MP4 Editor');
         
         try {
           const fileData = await readFileInChunks(
@@ -112,40 +141,42 @@ export function useFFmpegEditor() {
             effectiveChunkSize,
             (chunkProgress) => {
               setReadingProgress(chunkProgress);
-              addGlobalLog(
-                'info', 
-                `Reading file: ${chunkProgress.percent}% (Chunk ${chunkProgress.chunkIndex}/${chunkProgress.totalChunks})`, 
-                'MP4 Editor'
-              );
+              if (chunkProgress.chunkIndex % 3 === 0 || chunkProgress.chunkIndex === chunkProgress.totalChunks) {
+                addGlobalLog(
+                  'warning', 
+                  `Lese Datei: ${chunkProgress.percent}% (Chunk ${chunkProgress.chunkIndex}/${chunkProgress.totalChunks})`, 
+                  'MP4 Editor'
+                );
+              }
             }
           );
           
-          addGlobalLog('info', 'Writing file data to FFmpeg filesystem...', 'MP4 Editor');
+          addGlobalLog('warning', 'Schreibe Daten in FFmpeg Dateisystem...', 'MP4 Editor');
           await ffmpeg.writeFile(inputFileName, fileData);
-          addGlobalLog('success', 'Video file loaded into FFmpeg', 'MP4 Editor');
+          addGlobalLog('success', 'Video in FFmpeg geladen', 'MP4 Editor');
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
           
           // Check for memory-related errors
-          if (errorMsg.includes('memory') || errorMsg.includes('OOM') || errorMsg.includes('RangeError')) {
-            addGlobalLog('error', `Speicherfehler: Die Datei ist zu groß für den verfügbaren Arbeitsspeicher. Versuchen Sie den "Sparsamen Modus" oder eine kleinere Chunk-Größe.`, 'MP4 Editor');
-            throw new Error(`Speicherfehler: Datei zu groß (${sizeDisplay}). Versuchen Sie den "Sparsamen Modus" oder verwenden Sie Desktop-FFmpeg für sehr große Dateien.`);
+          if (errorMsg.includes('memory') || errorMsg.includes('OOM') || errorMsg.includes('RangeError') || errorMsg.includes('allocation')) {
+            addGlobalLog('error', `Speicherfehler: Die Datei ist zu groß für den verfügbaren Arbeitsspeicher.`, 'MP4 Editor');
+            throw new Error(`Speicherfehler: Datei zu groß (${sizeDisplay}). Browser können Dateien über ~2GB nicht verarbeiten. Bitte verwenden Sie Desktop-FFmpeg.`);
           }
           
           throw err;
         }
       } else {
-        addGlobalLog('info', `Writing video file (${sizeDisplay}) to FFmpeg filesystem...`, 'MP4 Editor');
+        addGlobalLog('info', `Schreibe Video-Datei (${sizeDisplay}) in FFmpeg Dateisystem...`, 'MP4 Editor');
         
         try {
           await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile));
-          addGlobalLog('success', 'Video file loaded into FFmpeg', 'MP4 Editor');
+          addGlobalLog('success', 'Video in FFmpeg geladen', 'MP4 Editor');
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
           
           // Retry with chunked reading if fetchFile fails
           if (errorMsg.includes('Code=-1') || errorMsg.includes('could not be read')) {
-            addGlobalLog('warning', 'Standard file reading failed, switching to chunked mode...', 'MP4 Editor');
+            addGlobalLog('warning', 'Standard-Lesemethode fehlgeschlagen, wechsle zu Chunk-Modus...', 'MP4 Editor');
             
             const fileData = await readFileInChunks(
               videoFile, 
@@ -156,7 +187,7 @@ export function useFFmpegEditor() {
             );
             
             await ffmpeg.writeFile(inputFileName, fileData);
-            addGlobalLog('success', 'Video file loaded via chunked reading', 'MP4 Editor');
+            addGlobalLog('success', 'Video via Chunk-Reading geladen', 'MP4 Editor');
           } else {
             throw err;
           }
@@ -222,13 +253,13 @@ export function useFFmpegEditor() {
 
       args.push(outputFileName);
 
-      addGlobalLog('info', `Executing FFmpeg with ${args.length} arguments...`, 'MP4 Editor');
-      addGlobalLog('info', `FFmpeg command: ffmpeg ${args.join(' ')}`, 'MP4 Editor');
+      addGlobalLog('info', `Starte FFmpeg mit ${args.length} Argumenten...`, 'MP4 Editor');
+      addGlobalLog('ffmpeg', `Befehl: ffmpeg ${args.join(' ')}`, 'MP4 Editor');
       await ffmpeg.exec(args);
-      addGlobalLog('success', 'FFmpeg processing complete', 'MP4 Editor');
+      addGlobalLog('success', 'FFmpeg Verarbeitung abgeschlossen', 'MP4 Editor');
 
       // Read output file
-      addGlobalLog('info', 'Reading output file...', 'MP4 Editor');
+      addGlobalLog('info', 'Lese Ausgabedatei...', 'MP4 Editor');
       const data = await ffmpeg.readFile(outputFileName);
       
       // Cleanup - aggressive for thrifty mode
@@ -258,17 +289,17 @@ export function useFFmpegEditor() {
       addGlobalLog('info', `Output blob size: ${(blob.size / 1024 / 1024).toFixed(2)} MB`, 'MP4 Editor');
       
       if (blob.size === 0) {
-        addGlobalLog('error', 'Output file is empty - FFmpeg processing may have failed', 'MP4 Editor');
-        throw new Error('Output file is empty - FFmpeg processing may have failed. Check console for FFmpeg logs.');
+        addGlobalLog('error', 'Ausgabedatei ist leer - FFmpeg-Verarbeitung möglicherweise fehlgeschlagen', 'MP4 Editor');
+        throw new Error('Ausgabedatei ist leer - FFmpeg-Verarbeitung fehlgeschlagen. Prüfen Sie die Konsole für FFmpeg-Logs.');
       }
       
       setProgress(100);
-      addGlobalLog('success', `Metadata embedding complete! Output: ${(blob.size / 1024 / 1024).toFixed(2)} MB`, 'MP4 Editor');
+      addGlobalLog('success', `Metadaten erfolgreich eingebettet! Ausgabe: ${formatFileSize(blob.size)}`, 'MP4 Editor');
       
       return blob;
     } catch (err) {
-      console.error('Failed to edit metadata:', err);
-      addGlobalLog('error', `Failed to edit metadata: ${err}`, 'MP4 Editor');
+      console.error('Metadaten-Bearbeitung fehlgeschlagen:', err);
+      addGlobalLog('error', `Metadaten-Bearbeitung fehlgeschlagen: ${err}`, 'MP4 Editor');
       throw err;
     } finally {
       setProcessing(false);
