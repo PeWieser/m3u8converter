@@ -3,8 +3,17 @@ import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import type { ConversionMetadata } from '@/types/converter';
 import { addGlobalLog } from '@/components/converter/GlobalLogWindow';
+import { 
+  readFileInChunks, 
+  loadMemorySettings, 
+  type MemorySettings,
+  type ChunkProgress 
+} from '@/lib/chunked-file-reader';
 
 const FFMPEG_CORE_URL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+
+// Threshold for using chunked reading (500MB)
+const CHUNKED_READING_THRESHOLD = 500 * 1024 * 1024;
 
 export interface EditorJob {
   id: string;
@@ -24,6 +33,7 @@ export function useFFmpegEditor() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [processing, setProcessing] = useState(false);
+  const [readingProgress, setReadingProgress] = useState<ChunkProgress | null>(null);
 
   const load = useCallback(async () => {
     if (loaded || loading) return;
@@ -63,7 +73,8 @@ export function useFFmpegEditor() {
     videoFile: File,
     metadata: ConversionMetadata,
     coverFile?: File,
-    onProgress?: (progress: number) => void
+    onProgress?: (progress: number) => void,
+    memorySettings?: MemorySettings
   ): Promise<Blob> => {
     if (!ffmpegRef.current) {
       throw new Error('FFmpeg not loaded');
@@ -72,15 +83,87 @@ export function useFFmpegEditor() {
     const ffmpeg = ffmpegRef.current;
     setProcessing(true);
     setProgress(0);
+    setReadingProgress(null);
+
+    // Get memory settings
+    const settings = memorySettings || loadMemorySettings();
+    const useChunkedReading = videoFile.size > CHUNKED_READING_THRESHOLD || settings.thriftyMode;
+    const effectiveChunkSize = settings.thriftyMode 
+      ? Math.min(settings.chunkSizeMB, 32) 
+      : settings.chunkSizeMB;
 
     try {
       // Write input video to virtual filesystem
       const inputFileName = 'input.mp4';
       const outputFileName = 'output.mp4';
       
-      addGlobalLog('info', `Writing video file (${(videoFile.size / 1024 / 1024).toFixed(2)} MB) to FFmpeg filesystem...`, 'MP4 Editor');
-      await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile));
-      addGlobalLog('success', 'Video file loaded into FFmpeg', 'MP4 Editor');
+      const fileSizeMB = (videoFile.size / 1024 / 1024).toFixed(2);
+      const fileSizeGB = (videoFile.size / 1024 / 1024 / 1024).toFixed(2);
+      const sizeDisplay = videoFile.size > 1024 * 1024 * 1024 
+        ? `${fileSizeGB} GB` 
+        : `${fileSizeMB} MB`;
+
+      if (useChunkedReading) {
+        addGlobalLog('info', `Using chunked reading (${effectiveChunkSize}MB chunks) for large file: ${sizeDisplay}`, 'MP4 Editor');
+        
+        try {
+          const fileData = await readFileInChunks(
+            videoFile, 
+            effectiveChunkSize,
+            (chunkProgress) => {
+              setReadingProgress(chunkProgress);
+              addGlobalLog(
+                'info', 
+                `Reading file: ${chunkProgress.percent}% (Chunk ${chunkProgress.chunkIndex}/${chunkProgress.totalChunks})`, 
+                'MP4 Editor'
+              );
+            }
+          );
+          
+          addGlobalLog('info', 'Writing file data to FFmpeg filesystem...', 'MP4 Editor');
+          await ffmpeg.writeFile(inputFileName, fileData);
+          addGlobalLog('success', 'Video file loaded into FFmpeg', 'MP4 Editor');
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          
+          // Check for memory-related errors
+          if (errorMsg.includes('memory') || errorMsg.includes('OOM') || errorMsg.includes('RangeError')) {
+            addGlobalLog('error', `Speicherfehler: Die Datei ist zu groß für den verfügbaren Arbeitsspeicher. Versuchen Sie den "Sparsamen Modus" oder eine kleinere Chunk-Größe.`, 'MP4 Editor');
+            throw new Error(`Speicherfehler: Datei zu groß (${sizeDisplay}). Versuchen Sie den "Sparsamen Modus" oder verwenden Sie Desktop-FFmpeg für sehr große Dateien.`);
+          }
+          
+          throw err;
+        }
+      } else {
+        addGlobalLog('info', `Writing video file (${sizeDisplay}) to FFmpeg filesystem...`, 'MP4 Editor');
+        
+        try {
+          await ffmpeg.writeFile(inputFileName, await fetchFile(videoFile));
+          addGlobalLog('success', 'Video file loaded into FFmpeg', 'MP4 Editor');
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          
+          // Retry with chunked reading if fetchFile fails
+          if (errorMsg.includes('Code=-1') || errorMsg.includes('could not be read')) {
+            addGlobalLog('warning', 'Standard file reading failed, switching to chunked mode...', 'MP4 Editor');
+            
+            const fileData = await readFileInChunks(
+              videoFile, 
+              effectiveChunkSize,
+              (chunkProgress) => {
+                setReadingProgress(chunkProgress);
+              }
+            );
+            
+            await ffmpeg.writeFile(inputFileName, fileData);
+            addGlobalLog('success', 'Video file loaded via chunked reading', 'MP4 Editor');
+          } else {
+            throw err;
+          }
+        }
+      }
+
+      setReadingProgress(null);
 
       // Build FFmpeg command args
       const args: string[] = ['-i', inputFileName];
@@ -111,14 +194,11 @@ export function useFFmpegEditor() {
       }
 
       // Add metadata
-      // Für Serien: title = Episodenname, show = Serienname
-      // Für Filme: title = Filmname
       if (metadata.title) {
         args.push('-metadata', `title=${metadata.title}`);
       }
       if (metadata.show) {
         args.push('-metadata', `show=${metadata.show}`);
-        // Für Serien media_type=10 hinzufügen (TV Show)
         args.push('-metadata', 'media_type=10');
       }
       if (metadata.season) {
@@ -151,7 +231,7 @@ export function useFFmpegEditor() {
       addGlobalLog('info', 'Reading output file...', 'MP4 Editor');
       const data = await ffmpeg.readFile(outputFileName);
       
-      // Cleanup
+      // Cleanup - aggressive for thrifty mode
       try { await ffmpeg.deleteFile(inputFileName); } catch {}
       try { await ffmpeg.deleteFile(outputFileName); } catch {}
       if (coverFile) {
@@ -163,12 +243,11 @@ export function useFFmpegEditor() {
       
       let blob: Blob;
       if (data instanceof Uint8Array) {
-        // Copy to a new ArrayBuffer to ensure it's a standard ArrayBuffer (not SharedArrayBuffer)
+        // Copy to a new ArrayBuffer to ensure it's a standard ArrayBuffer
         const buffer = new ArrayBuffer(data.byteLength);
         new Uint8Array(buffer).set(data);
         blob = new Blob([buffer], { type: 'video/mp4' });
       } else {
-        // Fallback for string (shouldn't happen with binary files)
         const encoder = new TextEncoder();
         const encoded = encoder.encode(data as string);
         const buffer = new ArrayBuffer(encoded.byteLength);
@@ -193,6 +272,7 @@ export function useFFmpegEditor() {
       throw err;
     } finally {
       setProcessing(false);
+      setReadingProgress(null);
     }
   }, []);
 
@@ -202,6 +282,7 @@ export function useFFmpegEditor() {
     loading,
     progress,
     processing,
+    readingProgress,
     editMetadata,
   };
 }

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Upload, FileVideo, Image, Download, Loader2, Trash2, Save, Film, Tv, User, Calendar, Tag, FileText, Link } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,13 @@ import { useFFmpegEditor } from '@/hooks/useFFmpegEditor';
 import { useTmdbSearch, type TmdbResult } from '@/hooks/useTmdbSearch';
 import type { ConversionMetadata } from '@/types/converter';
 import { supabase } from '@/integrations/supabase/client';
+import { MemorySettings } from './MemorySettings';
+import { 
+  loadMemorySettings, 
+  saveMemorySettings, 
+  getMemoryWarning,
+  type MemorySettings as MemorySettingsType 
+} from '@/lib/chunked-file-reader';
 
 export function MP4Editor() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -30,13 +37,30 @@ export function MP4Editor() {
   });
   const [outputBlob, setOutputBlob] = useState<Blob | null>(null);
   const [showTmdbDropdown, setShowTmdbDropdown] = useState(false);
+  const [memorySettings, setMemorySettings] = useState<MemorySettingsType>(loadMemorySettings);
+  const [memoryWarning, setMemoryWarning] = useState<string | null>(null);
   
-  const { load, loaded, loading: ffmpegLoading, progress, processing, editMetadata } = useFFmpegEditor();
+  const { load, loaded, loading: ffmpegLoading, progress, processing, readingProgress, editMetadata } = useFFmpegEditor();
   const { results, loading: tmdbLoading, search, clearResults, fetchDetails, fetchSeasonEpisodes } = useTmdbSearch();
 
   const [seasons, setSeasons] = useState<any[]>([]);
   const [episodes, setEpisodes] = useState<any[]>([]);
   const [selectedTmdb, setSelectedTmdb] = useState<any>(null);
+
+  // Update memory warning when file changes
+  useEffect(() => {
+    if (videoFile) {
+      setMemoryWarning(getMemoryWarning(videoFile));
+    } else {
+      setMemoryWarning(null);
+    }
+  }, [videoFile]);
+
+  // Save memory settings when changed
+  const handleMemorySettingsChange = useCallback((newSettings: MemorySettingsType) => {
+    setMemorySettings(newSettings);
+    saveMemorySettings(newSettings);
+  }, []);
 
   // Fetch cover image from URL (handles CORS via proxy for TMDB)
   const fetchCoverFromUrl = useCallback(async (url: string): Promise<File | null> => {
@@ -245,7 +269,7 @@ export function MP4Editor() {
         description: 'Metadaten werden eingebettet...',
       });
 
-      const blob = await editMetadata(videoFile, metadata, coverFile || undefined);
+      const blob = await editMetadata(videoFile, metadata, coverFile || undefined, undefined, memorySettings);
       setOutputBlob(blob);
 
       toast({
@@ -343,6 +367,29 @@ export function MP4Editor() {
 
       {videoFile && (
         <>
+          {/* Memory Settings */}
+          <MemorySettings
+            settings={memorySettings}
+            onChange={handleMemorySettingsChange}
+            fileSize={videoFile.size}
+            warning={memoryWarning}
+          />
+
+          {/* Reading Progress */}
+          {readingProgress && (
+            <div className="glass rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium">Datei wird gelesen...</span>
+                <span className="text-sm text-muted-foreground">
+                  Chunk {readingProgress.chunkIndex}/{readingProgress.totalChunks}
+                </span>
+              </div>
+              <Progress value={readingProgress.percent} className="h-2" />
+              <p className="text-xs text-muted-foreground mt-1">
+                {(readingProgress.bytesRead / 1024 / 1024).toFixed(0)} MB / {(readingProgress.totalBytes / 1024 / 1024).toFixed(0)} MB
+              </p>
+            </div>
+          )}
           {/* Cover Image */}
           <div className="glass rounded-xl p-6">
             <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
