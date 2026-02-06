@@ -301,11 +301,18 @@ export function mayExceedMemoryLimit(file: File): boolean {
  * Get memory warning message based on file size
  */
 export function getMemoryWarning(file: File): string | null {
-  if (file.size > 3 * 1024 * 1024 * 1024) {
-    return `Diese Datei ist sehr groß (${formatFileSize(file.size)}). Dateien über 3GB können im Browser aufgrund von WebAssembly-Speicherlimits problematisch sein. Erwägen Sie die Verwendung von Desktop-FFmpeg.`;
+  if (file.size > 2 * 1024 * 1024 * 1024) {
+    return `Diese Datei ist zu groß für Browser-Verarbeitung (${formatFileSize(file.size)}). Browser können keine Dateien über 2GB verarbeiten. Bitte verwenden Sie Desktop-FFmpeg.`;
   }
   if (file.size > 1.5 * 1024 * 1024 * 1024) {
-    return `Große Datei erkannt (${formatFileSize(file.size)}). Aktivieren Sie den "Sparsamen Modus" für bessere Stabilität bei großen Dateien.`;
+    return `Große Datei erkannt (${formatFileSize(file.size)}). Aktivieren Sie den "Sparsamen Modus" für bessere Stabilität.`;
   }
   return null;
+}
+
+/**
+ * Check if file exceeds browser processing limit (2GB)
+ */
+export function exceedsBrowserLimit(file: File): boolean {
+  return file.size > 2 * 1024 * 1024 * 1024;
 }

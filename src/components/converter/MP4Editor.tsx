@@ -15,6 +15,8 @@ import {
   loadMemorySettings, 
   saveMemorySettings, 
   getMemoryWarning,
+  exceedsBrowserLimit,
+  formatFileSize,
   type MemorySettings as MemorySettingsType 
 } from '@/lib/chunked-file-reader';
 
@@ -127,6 +129,19 @@ export function MP4Editor() {
         });
         return;
       }
+      
+      // Check if file exceeds browser limit (2GB)
+      if (exceedsBrowserLimit(file)) {
+        toast({
+          title: 'Datei zu groß',
+          description: `Die Datei (${formatFileSize(file.size)}) überschreitet das 2GB Browser-Limit. Bitte verwenden Sie Desktop-FFmpeg für diese Datei.`,
+          variant: 'destructive',
+        });
+        // Still set the file so user can see the warning
+        setVideoFile(file);
+        return;
+      }
+      
       setVideoFile(file);
       const baseTitle = file.name.replace(/\.mp4$/i, '');
       setMetadata(prev => ({
@@ -255,6 +270,16 @@ export function MP4Editor() {
   const handleProcess = useCallback(async () => {
     if (!videoFile) return;
 
+    // Block processing for files over 2GB
+    if (exceedsBrowserLimit(videoFile)) {
+      toast({
+        title: 'Datei zu groß',
+        description: `Dateien über 2GB können im Browser nicht verarbeitet werden. Bitte verwenden Sie Desktop-FFmpeg.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
       if (!loaded) {
         toast({
@@ -283,7 +308,7 @@ export function MP4Editor() {
         variant: 'destructive',
       });
     }
-  }, [videoFile, metadata, coverFile, loaded, load, editMetadata]);
+  }, [videoFile, metadata, coverFile, loaded, load, editMetadata, memorySettings]);
 
   const handleDownload = useCallback(() => {
     if (!outputBlob) return;
