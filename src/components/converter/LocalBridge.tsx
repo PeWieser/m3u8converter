@@ -99,7 +99,7 @@ export const LocalBridge = () => {
   };
 
   // Download URL for the EXE
-  const downloadUrl = 'https://raw.githubusercontent.com/AJMlC0de/m3u8converter/main/ffmpegserver.exe';
+  const downloadUrl = 'https://github.com/PeWieser/m3u8converter/raw/main/ffmpegserver.exe';
 
   return (
     <div className="glass rounded-xl p-6 space-y-6">
