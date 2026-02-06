@@ -309,26 +309,25 @@ export function MP4Editor() {
 
   const handleProcess = useCallback(async () => {
     // Local processing via bridge
-    if (processingMode === 'local' && localBridge.connected) {
+    if (processingMode === 'local' && localBridge.connected && localFilePath) {
       // Convert metadata to local bridge format
       const bridgeMetadata: LocalBridgeMetadata = {
         title: metadata.title,
-        author: metadata.author,
+        artist: metadata.author || metadata.director,
         show: metadata.show,
         season: metadata.season,
         episode: metadata.episode,
-        date: metadata.date,
-        director: metadata.director,
+        year: metadata.date,
         genre: metadata.genre,
         description: metadata.description,
       };
       
-      const result = await localBridge.startConversion(bridgeMetadata);
+      const result = await localBridge.startConversion(localFilePath, bridgeMetadata, coverFile || undefined);
       
       if (result.success) {
         toast({
-          title: 'Verarbeitung abgeschlossen',
-          description: `Ausgabe: ${result.outputPath}`,
+          title: 'Verarbeitung gestartet',
+          description: 'Die Datei wird verarbeitet. Fortschritt wird angezeigt.',
         });
       } else {
         toast({

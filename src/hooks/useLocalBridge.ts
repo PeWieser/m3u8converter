@@ -1,15 +1,14 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 
-const API_BASE = 'http://localhost:5001';
+const API_BASE = 'http://127.0.0.1:5001';
 
 export interface LocalBridgeMetadata {
   title?: string;
-  author?: string;
   show?: string;
   season?: string;
   episode?: string;
-  date?: string;
-  director?: string;
+  artist?: string;
+  year?: string;
   genre?: string;
   description?: string;
 }
@@ -21,7 +20,21 @@ export interface LocalBridgeState {
   status: string;
   processing: boolean;
   progress: number;
+  progressMessage: string;
   error: string | null;
+}
+
+export interface LocalBridgeStartPayload {
+  path: string;
+  title: string;
+  show: string;
+  season: string;
+  episode: string;
+  artist: string;
+  year: string;
+  genre: string;
+  description: string;
+  cover: string | null;
 }
 
 export const useLocalBridge = () => {
@@ -32,10 +45,12 @@ export const useLocalBridge = () => {
     status: 'Prüfe Verbindung...',
     processing: false,
     progress: 0,
+    progressMessage: '',
     error: null,
   });
 
   const checkIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const statusPollingRef = useRef<NodeJS.Timeout | null>(null);
 
   const updateState = useCallback((updates: Partial<LocalBridgeState>) => {
     setState(prev => ({ ...prev, ...updates }));
@@ -116,34 +131,115 @@ export const useLocalBridge = () => {
     }
   }, [state.connected, updateState]);
 
+  const stopStatusPolling = useCallback(() => {
+    if (statusPollingRef.current) {
+      clearInterval(statusPollingRef.current);
+      statusPollingRef.current = null;
+    }
+  }, []);
+
+  const pollStatus = useCallback(async (): Promise<void> => {
+    try {
+      const response = await fetch(`${API_BASE}/status`, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+      
+      updateState({
+        progress: data.percent || 0,
+        progressMessage: data.message || '',
+      });
+
+      if (data.status === 'done') {
+        stopStatusPolling();
+        updateState({
+          processing: false,
+          progress: 100,
+          progressMessage: '',
+          status: 'Verarbeitung abgeschlossen!',
+          error: null,
+        });
+      } else if (data.status === 'error') {
+        stopStatusPolling();
+        updateState({
+          processing: false,
+          progress: 0,
+          progressMessage: '',
+          status: 'Verarbeitung fehlgeschlagen',
+          error: data.message || 'Unbekannter Fehler',
+        });
+      }
+    } catch (err) {
+      console.error('Status polling error:', err);
+    }
+  }, [updateState, stopStatusPolling]);
+
+  const startStatusPolling = useCallback(() => {
+    stopStatusPolling();
+    statusPollingRef.current = setInterval(pollStatus, 1000);
+  }, [pollStatus, stopStatusPolling]);
+
+  const fileToBase64 = useCallback(async (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }, []);
+
   const startConversion = useCallback(async (
+    filePath: string,
     metadata: LocalBridgeMetadata,
-    coverPath?: string,
-    outputPath?: string
-  ): Promise<{ success: boolean; outputPath?: string; error?: string }> => {
-    if (!state.connected || !state.filePath) {
-      return { success: false, error: 'Keine Datei ausgewählt oder nicht verbunden' };
+    coverFile?: File,
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!state.connected) {
+      return { success: false, error: 'Nicht mit PC-Modul verbunden' };
+    }
+
+    if (!filePath) {
+      return { success: false, error: 'Kein Dateipfad angegeben' };
     }
 
     try {
       updateState({ 
         processing: true, 
         progress: 0,
+        progressMessage: '',
         status: 'Starte Verarbeitung...',
         error: null 
       });
 
-      const response = await fetch(`${API_BASE}/convert`, {
+      // Convert cover file to base64 if provided
+      let coverBase64: string | null = null;
+      if (coverFile) {
+        coverBase64 = await fileToBase64(coverFile);
+      }
+
+      const payload: LocalBridgeStartPayload = {
+        path: filePath,
+        title: metadata.title || '',
+        show: metadata.show || '',
+        season: metadata.season || '',
+        episode: metadata.episode || '',
+        artist: metadata.artist || '',
+        year: metadata.year || '',
+        genre: metadata.genre || '',
+        description: metadata.description || '',
+        cover: coverBase64,
+      };
+
+      const response = await fetch(`${API_BASE}/start`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          path: state.filePath,
-          metadata,
-          coverPath,
-          outputPath,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -151,32 +247,37 @@ export const useLocalBridge = () => {
         throw new Error(errorData.error || 'Verarbeitung fehlgeschlagen');
       }
 
-      const data = await response.json();
+      // Start polling for status
+      startStatusPolling();
 
-      updateState({ 
-        processing: false, 
-        progress: 100,
-        status: 'Verarbeitung abgeschlossen!',
-        error: null 
-      });
-
-      return { success: true, outputPath: data.outputPath };
+      return { success: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unbekannter Fehler';
       updateState({ 
         processing: false, 
         progress: 0,
+        progressMessage: '',
         status: 'Verarbeitung fehlgeschlagen',
         error: message 
       });
       return { success: false, error: message };
     }
-  }, [state.connected, state.filePath, updateState]);
+  }, [state.connected, updateState, fileToBase64, startStatusPolling]);
 
   const clearFile = useCallback(() => {
     updateState({ 
       filePath: null, 
       status: state.connected ? 'Verbunden mit PC-Modul' : 'Nicht verbunden',
+      error: null 
+    });
+  }, [state.connected, updateState]);
+
+  const setFilePath = useCallback((path: string | null) => {
+    updateState({ 
+      filePath: path, 
+      status: path 
+        ? `Datei ausgewählt: ${path.split(/[/\\]/).pop()}`
+        : (state.connected ? 'Verbunden mit PC-Modul' : 'Nicht verbunden'),
       error: null 
     });
   }, [state.connected, updateState]);
@@ -198,8 +299,9 @@ export const useLocalBridge = () => {
       if (checkIntervalRef.current) {
         clearInterval(checkIntervalRef.current);
       }
+      stopStatusPolling();
     };
-  }, [checkConnection]);
+  }, [checkConnection, stopStatusPolling]);
 
   return {
     ...state,
@@ -207,6 +309,7 @@ export const useLocalBridge = () => {
     selectFile,
     startConversion,
     clearFile,
+    setFilePath,
     openModule,
   };
 };

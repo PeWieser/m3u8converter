@@ -17,6 +17,9 @@ export const SUPPORTED_VIDEO_EXTENSIONS = [
   'rm', 'rmvb', 'asf', 'divx', 'xvid'
 ];
 
+// Extension strings with dots for file input accept attribute
+export const VIDEO_EXTENSIONS = SUPPORTED_VIDEO_EXTENSIONS.map(ext => `.${ext}`);
+
 export const SUPPORTED_VIDEO_MIMETYPES = [
   'video/mp4',
   'video/x-m4v',

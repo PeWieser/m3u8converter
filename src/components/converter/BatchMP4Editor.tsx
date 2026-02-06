@@ -1,13 +1,15 @@
-import { useState, useCallback, useEffect } from 'react';
-import { Upload, FileVideo, Image, Download, Loader2, Trash2, Play, CheckCircle, AlertCircle, FolderUp, Film, Tv, Search, ChevronDown, ChevronUp, Link } from 'lucide-react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { Upload, FileVideo, Image, Download, Loader2, Trash2, Play, CheckCircle, AlertCircle, FolderUp, Film, Tv, Search, ChevronDown, ChevronUp, Link, Monitor, Globe, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
 import { useFFmpegEditor } from '@/hooks/useFFmpegEditor';
 import { useTmdbSearch, type TmdbResult } from '@/hooks/useTmdbSearch';
+import { useLocalBridge, type LocalBridgeMetadata } from '@/hooks/useLocalBridge';
 import type { ConversionMetadata } from '@/types/converter';
 import { supabase } from '@/integrations/supabase/client';
 import JSZip from 'jszip';
@@ -18,16 +20,26 @@ import {
   getMemoryWarning,
   type MemorySettings as MemorySettingsType 
 } from '@/lib/chunked-file-reader';
+import { 
+  VIDEO_EXTENSIONS,
+  getFormatCapabilities,
+} from '@/lib/video-format-utils';
+import {
+  getProcessingRecommendation,
+} from '@/lib/processing-mode';
 
 interface BatchFile {
   id: string;
-  file: File;
+  file?: File;
+  localPath?: string;
+  processingMode: 'browser' | 'local';
   metadata: ConversionMetadata;
   coverFile?: File;
   coverPreview?: string;
   coverUrl?: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
   progress: number;
+  progressMessage?: string;
   outputBlob?: Blob;
   error?: string;
   expanded?: boolean;
@@ -41,9 +53,41 @@ export function BatchMP4Editor() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isProcessingBatch, setIsProcessingBatch] = useState(false);
   const [memorySettings, setMemorySettings] = useState<MemorySettingsType>(loadMemorySettings);
+  const [currentLocalProcessingId, setCurrentLocalProcessingId] = useState<string | null>(null);
   
   const { load, loaded, loading: ffmpegLoading, editMetadata, readingProgress } = useFFmpegEditor();
   const tmdbHook = useTmdbSearch();
+  const localBridge = useLocalBridge();
+  
+  const statusPollingRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Watch for local bridge processing completion
+  useEffect(() => {
+    if (currentLocalProcessingId && !localBridge.processing) {
+      // Processing finished
+      const wasSuccess = !localBridge.error && localBridge.progress >= 100;
+      
+      setFiles(prev => prev.map(f => 
+        f.id === currentLocalProcessingId ? {
+          ...f,
+          status: wasSuccess ? 'completed' : 'error',
+          progress: wasSuccess ? 100 : 0,
+          error: localBridge.error || undefined,
+        } : f
+      ));
+      
+      setCurrentLocalProcessingId(null);
+    } else if (currentLocalProcessingId && localBridge.processing) {
+      // Update progress
+      setFiles(prev => prev.map(f => 
+        f.id === currentLocalProcessingId ? {
+          ...f,
+          progress: localBridge.progress,
+          progressMessage: localBridge.progressMessage,
+        } : f
+      ));
+    }
+  }, [currentLocalProcessingId, localBridge.processing, localBridge.progress, localBridge.error, localBridge.progressMessage]);
 
   // Save memory settings when changed
   const handleMemorySettingsChange = useCallback((newSettings: MemorySettingsType) => {
@@ -52,11 +96,13 @@ export function BatchMP4Editor() {
   }, []);
 
   // Check for large files
-  const hasLargeFiles = files.some(f => f.file.size > 500 * 1024 * 1024);
+  const hasLargeFiles = files.some(f => f.file && f.file.size > 500 * 1024 * 1024);
   const largestFileWarning = files.reduce((warning, f) => {
-    const fileWarning = getMemoryWarning(f.file);
-    if (fileWarning && (!warning || f.file.size > 1.5 * 1024 * 1024 * 1024)) {
-      return fileWarning;
+    if (f.file) {
+      const fileWarning = getMemoryWarning(f.file);
+      if (fileWarning && (!warning || f.file.size > 1.5 * 1024 * 1024 * 1024)) {
+        return fileWarning;
+      }
     }
     return warning;
   }, null as string | null);
@@ -101,70 +147,125 @@ export function BatchMP4Editor() {
     }
   }, []);
 
+  // Accept all video formats
+  const acceptedFormats = VIDEO_EXTENSIONS.join(',');
+
   const handleFilesSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
-    const mp4Files = selectedFiles.filter(f => f.type.includes('video/mp4') || f.name.endsWith('.mp4'));
+    const videoFiles = selectedFiles.filter(f => {
+      const ext = '.' + f.name.split('.').pop()?.toLowerCase();
+      return VIDEO_EXTENSIONS.includes(ext) || f.type.includes('video/');
+    });
     
-    if (mp4Files.length === 0) {
+    if (videoFiles.length === 0) {
       toast({
-        title: 'Keine MP4-Dateien',
-        description: 'Bitte nur MP4-Dateien auswählen',
+        title: 'Keine Videodateien',
+        description: 'Bitte nur Videodateien auswählen',
         variant: 'destructive',
       });
       return;
     }
 
-    const newFiles: BatchFile[] = mp4Files.map(file => ({
-      id: crypto.randomUUID(),
-      file,
-      metadata: {
-        title: file.name.replace(/\.mp4$/i, ''),
-        author: '',
-      },
-      status: 'pending',
-      progress: 0,
-      expanded: true, // Expand first to show TMDB search
-    }));
+    const newFiles: BatchFile[] = videoFiles.map(file => {
+      const rec = getProcessingRecommendation(file.size, localBridge.connected);
+      const mode = rec.mode === 'local' && localBridge.connected ? 'local' : 'browser';
+      
+      return {
+        id: crypto.randomUUID(),
+        file,
+        processingMode: mode,
+        metadata: {
+          title: file.name.replace(/\.[^/.]+$/, ''),
+          author: '',
+        },
+        status: 'pending',
+        progress: 0,
+        expanded: true,
+      };
+    });
 
     setFiles(prev => [...prev, ...newFiles]);
     toast({
-      title: `${mp4Files.length} Dateien hinzugefügt`,
+      title: `${videoFiles.length} Dateien hinzugefügt`,
       description: 'Dateien zur Batch-Warteschlange hinzugefügt',
     });
-  }, []);
+  }, [localBridge.connected]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     const droppedFiles = Array.from(e.dataTransfer.files);
-    const mp4Files = droppedFiles.filter(f => f.type.includes('video/mp4') || f.name.endsWith('.mp4'));
+    const videoFiles = droppedFiles.filter(f => {
+      const ext = '.' + f.name.split('.').pop()?.toLowerCase();
+      return VIDEO_EXTENSIONS.includes(ext) || f.type.includes('video/');
+    });
     
-    if (mp4Files.length === 0) {
+    if (videoFiles.length === 0) {
       toast({
-        title: 'Keine MP4-Dateien',
-        description: 'Bitte nur MP4-Dateien ablegen',
+        title: 'Keine Videodateien',
+        description: 'Bitte nur Videodateien ablegen',
         variant: 'destructive',
       });
       return;
     }
 
-    const newFiles: BatchFile[] = mp4Files.map(file => ({
-      id: crypto.randomUUID(),
-      file,
-      metadata: {
-        title: file.name.replace(/\.mp4$/i, ''),
-        author: '',
-      },
-      status: 'pending',
-      progress: 0,
-      expanded: true,
-    }));
+    const newFiles: BatchFile[] = videoFiles.map(file => {
+      const rec = getProcessingRecommendation(file.size, localBridge.connected);
+      const mode = rec.mode === 'local' && localBridge.connected ? 'local' : 'browser';
+      
+      return {
+        id: crypto.randomUUID(),
+        file,
+        processingMode: mode,
+        metadata: {
+          title: file.name.replace(/\.[^/.]+$/, ''),
+          author: '',
+        },
+        status: 'pending',
+        progress: 0,
+        expanded: true,
+      };
+    });
 
     setFiles(prev => [...prev, ...newFiles]);
     toast({
-      title: `${mp4Files.length} Dateien hinzugefügt`,
+      title: `${videoFiles.length} Dateien hinzugefügt`,
       description: 'Dateien zur Batch-Warteschlange hinzugefügt',
     });
-  }, []);
+  }, [localBridge.connected]);
+
+  // Handle local file selection via bridge
+  const handleSelectLocalFile = useCallback(async () => {
+    if (!localBridge.connected) {
+      toast({
+        title: 'PC-Modul nicht verbunden',
+        description: 'Bitte starte das PC-Modul für die lokale Dateiauswahl',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const path = await localBridge.selectFile();
+    if (path) {
+      const newFile: BatchFile = {
+        id: crypto.randomUUID(),
+        localPath: path,
+        processingMode: 'local',
+        metadata: {
+          title: path.split(/[/\\]/).pop()?.replace(/\.[^/.]+$/, '') || '',
+          author: '',
+        },
+        status: 'pending',
+        progress: 0,
+        expanded: true,
+      };
+
+      setFiles(prev => [...prev, newFile]);
+      toast({
+        title: 'Lokale Datei hinzugefügt',
+        description: path.split(/[/\\]/).pop(),
+      });
+    }
+  }, [localBridge]);
 
   const removeFile = useCallback((id: string) => {
     setFiles(prev => prev.filter(f => f.id !== id));
@@ -223,7 +324,6 @@ export function BatchMP4Editor() {
     const details = await tmdbHook.fetchDetails(result.id, result.type);
     
     if (details) {
-      // Fetch cover
       let coverFile: File | undefined;
       let coverPreview: string | undefined;
       let coverUrl: string | undefined;
@@ -339,48 +439,106 @@ export function BatchMP4Editor() {
     setIsProcessingBatch(true);
 
     try {
-      if (!loaded) {
-        toast({
-          title: 'FFmpeg laden...',
-          description: 'Bitte warten...',
-        });
-        await load();
+      // Separate browser and local files
+      const browserFiles = pendingFiles.filter(f => f.processingMode === 'browser' && f.file);
+      const localFiles = pendingFiles.filter(f => f.processingMode === 'local');
+
+      // Process browser files first (can be done in parallel with FFmpeg)
+      if (browserFiles.length > 0) {
+        if (!loaded) {
+          toast({
+            title: 'FFmpeg laden...',
+            description: 'Bitte warten...',
+          });
+          await load();
+        }
+
+        for (const batchFile of browserFiles) {
+          if (!batchFile.file) continue;
+          
+          setFiles(prev => prev.map(f => 
+            f.id === batchFile.id ? { ...f, status: 'processing' as const, progress: 0 } : f
+          ));
+
+          try {
+            const blob = await editMetadata(
+              batchFile.file, 
+              batchFile.metadata, 
+              batchFile.coverFile,
+              (progress) => {
+                setFiles(prev => prev.map(f => 
+                  f.id === batchFile.id ? { ...f, progress } : f
+                ));
+              },
+              memorySettings
+            );
+
+            setFiles(prev => prev.map(f => 
+              f.id === batchFile.id ? { 
+                ...f, 
+                status: 'completed' as const, 
+                progress: 100, 
+                outputBlob: blob 
+              } : f
+            ));
+          } catch (error) {
+            setFiles(prev => prev.map(f => 
+              f.id === batchFile.id ? { 
+                ...f, 
+                status: 'error' as const, 
+                error: error instanceof Error ? error.message : 'Unbekannter Fehler'
+              } : f
+            ));
+          }
+        }
       }
 
-      for (const batchFile of pendingFiles) {
-        setFiles(prev => prev.map(f => 
-          f.id === batchFile.id ? { ...f, status: 'processing' as const, progress: 0 } : f
-        ));
-
-        try {
-          const blob = await editMetadata(
-            batchFile.file, 
-            batchFile.metadata, 
-            batchFile.coverFile,
-            (progress) => {
-              setFiles(prev => prev.map(f => 
-                f.id === batchFile.id ? { ...f, progress } : f
-              ));
-            },
-            memorySettings
-          );
+      // Process local files sequentially via bridge
+      if (localFiles.length > 0 && localBridge.connected) {
+        for (const batchFile of localFiles) {
+          const filePath = batchFile.localPath;
+          if (!filePath) continue;
 
           setFiles(prev => prev.map(f => 
-            f.id === batchFile.id ? { 
-              ...f, 
-              status: 'completed' as const, 
-              progress: 100, 
-              outputBlob: blob 
-            } : f
+            f.id === batchFile.id ? { ...f, status: 'processing' as const, progress: 0 } : f
           ));
-        } catch (error) {
-          setFiles(prev => prev.map(f => 
-            f.id === batchFile.id ? { 
-              ...f, 
-              status: 'error' as const, 
-              error: error instanceof Error ? error.message : 'Unbekannter Fehler'
-            } : f
-          ));
+          
+          setCurrentLocalProcessingId(batchFile.id);
+
+          const bridgeMetadata: LocalBridgeMetadata = {
+            title: batchFile.metadata.title,
+            artist: batchFile.metadata.author || batchFile.metadata.director,
+            show: batchFile.metadata.show,
+            season: batchFile.metadata.season,
+            episode: batchFile.metadata.episode,
+            year: batchFile.metadata.date,
+            genre: batchFile.metadata.genre,
+            description: batchFile.metadata.description,
+          };
+
+          const result = await localBridge.startConversion(filePath, bridgeMetadata, batchFile.coverFile);
+          
+          if (!result.success) {
+            setFiles(prev => prev.map(f => 
+              f.id === batchFile.id ? { 
+                ...f, 
+                status: 'error' as const, 
+                error: result.error || 'Unbekannter Fehler'
+              } : f
+            ));
+            setCurrentLocalProcessingId(null);
+            continue;
+          }
+
+          // Wait for processing to complete (polling is handled by useLocalBridge)
+          await new Promise<void>((resolve) => {
+            const checkInterval = setInterval(() => {
+              if (!localBridge.processing) {
+                clearInterval(checkInterval);
+                resolve();
+              }
+            }, 500);
+          });
         }
       }
 
@@ -389,8 +547,9 @@ export function BatchMP4Editor() {
       });
     } finally {
       setIsProcessingBatch(false);
+      setCurrentLocalProcessingId(null);
     }
-  }, [files, loaded, load, editMetadata]);
+  }, [files, loaded, load, editMetadata, memorySettings, localBridge]);
 
   const getFilename = useCallback((file: BatchFile) => {
     const meta = file.metadata;
@@ -399,7 +558,7 @@ export function BatchMP4Editor() {
       const episodePadded = meta.episode.padStart(2, '0');
       return `${meta.show} - S${seasonPadded}E${episodePadded} - ${meta.title}`;
     }
-    return meta.title || file.file.name.replace(/\.mp4$/i, '');
+    return meta.title || (file.file?.name || file.localPath?.split(/[/\\]/).pop() || 'output').replace(/\.[^/.]+$/, '');
   }, []);
 
   const downloadSelected = useCallback(async () => {
@@ -502,6 +661,7 @@ export function BatchMP4Editor() {
   const pendingFiles = files.filter(f => f.status === 'pending');
   const processingFiles = files.filter(f => f.status === 'processing');
   const completedFiles = files.filter(f => f.status === 'completed' && f.outputBlob);
+  const localCompletedFiles = files.filter(f => f.status === 'completed' && f.processingMode === 'local');
   const errorFiles = files.filter(f => f.status === 'error');
 
   const allSelected = completedFiles.length > 0 && completedFiles.every(f => selectedIds.has(f.id));
@@ -512,33 +672,56 @@ export function BatchMP4Editor() {
       <div className="glass rounded-xl p-6">
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
           <FolderUp className="h-5 w-5 text-primary" />
-          Batch-Bearbeitung - Mehrere MP4-Dateien
+          Batch-Bearbeitung - Mehrere Video-Dateien
         </h3>
         
-        <label 
-          className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-border/50 rounded-lg cursor-pointer hover:bg-secondary/30 transition-colors"
-          onDrop={handleDrop}
-          onDragOver={(e) => e.preventDefault()}
-        >
-          <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-          <span className="text-sm text-muted-foreground">Mehrere MP4-Dateien hierher ziehen oder klicken</span>
-          <span className="text-xs text-muted-foreground mt-1">(Mit TMDB-Suche und Cover-Support)</span>
-          <input
-            type="file"
-            accept="video/mp4,.mp4"
-            multiple
-            onChange={handleFilesSelect}
-            className="hidden"
-          />
-        </label>
+        <div className="space-y-4">
+          {/* Browser file selection */}
+          <label 
+            className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-border/50 rounded-lg cursor-pointer hover:bg-secondary/30 transition-colors"
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
+          >
+            <Upload className="h-8 w-8 text-muted-foreground mb-2" />
+            <span className="text-sm text-muted-foreground">Mehrere Videodateien hierher ziehen oder klicken</span>
+            <span className="text-xs text-muted-foreground mt-1">(Alle FFmpeg-kompatiblen Formate: MP4, MKV, TS, AVI, MOV...)</span>
+            <input
+              type="file"
+              accept={acceptedFormats}
+              multiple
+              onChange={handleFilesSelect}
+              className="hidden"
+            />
+          </label>
+
+          {/* Local file selection button */}
+          {localBridge.connected && (
+            <Button
+              variant="glass"
+              onClick={handleSelectLocalFile}
+              className="w-full"
+              disabled={isProcessingBatch}
+            >
+              <FolderOpen className="h-4 w-4 mr-2" />
+              Lokale Datei hinzufügen (PC-Modul)
+            </Button>
+          )}
+          
+          {!localBridge.connected && (
+            <div className="text-xs text-muted-foreground text-center">
+              <Monitor className="h-4 w-4 inline mr-1" />
+              PC-Modul nicht verbunden – nur Browser-Verarbeitung verfügbar
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Memory Settings */}
-      {files.length > 0 && (
+      {files.some(f => f.processingMode === 'browser' && f.file) && (
         <MemorySettings
           settings={memorySettings}
           onChange={handleMemorySettingsChange}
-          fileSize={files.reduce((max, f) => Math.max(max, f.file.size), 0)}
+          fileSize={files.reduce((max, f) => Math.max(max, f.file?.size || 0), 0)}
           warning={largestFileWarning}
         />
       )}
@@ -616,7 +799,7 @@ export function BatchMP4Editor() {
                   className="flex items-center gap-3 p-3 cursor-pointer"
                   onClick={() => file.status === 'pending' && toggleExpand(file.id)}
                 >
-                  {file.status === 'completed' && (
+                  {file.status === 'completed' && file.outputBlob && (
                     <Checkbox
                       checked={selectedIds.has(file.id)}
                       onCheckedChange={() => toggleSelection(file.id)}
@@ -652,13 +835,22 @@ export function BatchMP4Editor() {
                   </div>
                   
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">
-                      {file.metadata.show && file.metadata.season && file.metadata.episode 
-                        ? `${file.metadata.show} - S${file.metadata.season.padStart(2,'0')}E${file.metadata.episode.padStart(2,'0')} - ${file.metadata.title}`
-                        : file.metadata.title || file.file.name}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium truncate">
+                        {file.metadata.show && file.metadata.season && file.metadata.episode 
+                          ? `${file.metadata.show} - S${file.metadata.season.padStart(2,'0')}E${file.metadata.episode.padStart(2,'0')} - ${file.metadata.title}`
+                          : file.metadata.title || (file.file?.name || file.localPath?.split(/[/\\]/).pop())}
+                      </p>
+                      <Badge variant="secondary" className="text-xs">
+                        {file.processingMode === 'local' ? (
+                          <><Monitor className="h-3 w-3 mr-1" />Lokal</>
+                        ) : (
+                          <><Globe className="h-3 w-3 mr-1" />Browser</>
+                        )}
+                      </Badge>
+                    </div>
                     <p className="text-xs text-muted-foreground">
-                      {file.file.name} • {(file.file.size / 1024 / 1024).toFixed(2)} MB
+                      {file.file ? `${file.file.name} • ${(file.file.size / 1024 / 1024).toFixed(2)} MB` : file.localPath}
                       {file.status === 'processing' && ` • ${file.progress}%`}
                       {file.status === 'error' && ` • ${file.error}`}
                     </p>
@@ -873,17 +1065,13 @@ export function BatchMP4Editor() {
               </div>
             </div>
           )}
-        </div>
-      )}
 
-      {/* Stats */}
-      {files.length > 0 && (
-        <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-          <span>Ausstehend: {pendingFiles.length}</span>
-          <span>In Bearbeitung: {processingFiles.length}</span>
-          <span className="text-green-400">Fertig: {completedFiles.length}</span>
-          {errorFiles.length > 0 && (
-            <span className="text-destructive">Fehler: {errorFiles.length}</span>
+          {/* Info for locally processed files */}
+          {localCompletedFiles.length > 0 && (
+            <div className="rounded-lg bg-muted/30 p-3 text-xs text-muted-foreground">
+              <Monitor className="h-4 w-4 inline mr-1" />
+              Lokale Dateien werden direkt auf dem PC gespeichert. Downloads sind nur für Browser-verarbeitete Dateien verfügbar.
+            </div>
           )}
         </div>
       )}
