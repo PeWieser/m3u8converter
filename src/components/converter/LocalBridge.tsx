@@ -139,7 +139,7 @@ export const LocalBridge = () => {
             variant="ghost" 
             size="icon" 
             className="h-8 w-8"
-            onClick={() => checkConnection()}
+            onClick={async () => { await checkConnection(); }}
             disabled={checking}
           >
             <RefreshCw className={`h-4 w-4 ${checking ? 'animate-spin' : ''}`} />
@@ -167,9 +167,9 @@ export const LocalBridge = () => {
                 PC-Modul herunterladen
               </a>
             </Button>
-            <Button variant="glass" onClick={openModule}>
+            <Button variant="glass" onClick={() => openModule()}>
               <ExternalLink className="h-4 w-4 mr-2" />
-              Modul öffnen
+              Modul starten
             </Button>
           </div>
 
