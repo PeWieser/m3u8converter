@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Upload, FileVideo, Image, Download, Loader2, Trash2, Save, Film, Tv, User, Calendar, Tag, FileText, Link } from 'lucide-react';
+import { Image, Download, Loader2, Trash2, Save, Film, Tv, User, Calendar, Tag, FileText, Link, Upload, Monitor, Globe, FileVideo } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -11,6 +11,8 @@ import { useTmdbSearch, type TmdbResult } from '@/hooks/useTmdbSearch';
 import type { ConversionMetadata } from '@/types/converter';
 import { supabase } from '@/integrations/supabase/client';
 import { MemorySettings } from './MemorySettings';
+import { SmartFilePicker } from './SmartFilePicker';
+import { useLocalBridge, type LocalBridgeMetadata } from '@/hooks/useLocalBridge';
 import { 
   loadMemorySettings, 
   saveMemorySettings, 
@@ -19,9 +21,22 @@ import {
   formatFileSize,
   type MemorySettings as MemorySettingsType 
 } from '@/lib/chunked-file-reader';
+import { 
+  getFormatCapabilities,
+  type VideoFormatInfo 
+} from '@/lib/video-format-utils';
+import { 
+  getProcessingRecommendation,
+  type ProcessingRecommendation 
+} from '@/lib/processing-mode';
 
 export function MP4Editor() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [localFilePath, setLocalFilePath] = useState<string | null>(null);
+  const [processingMode, setProcessingMode] = useState<'browser' | 'local'>('browser');
+  const [recommendation, setRecommendation] = useState<ProcessingRecommendation | null>(null);
+  const [formatInfo, setFormatInfo] = useState<VideoFormatInfo | null>(null);
+  
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [coverPreview, setCoverPreview] = useState<string | null>(null);
   const [coverUrl, setCoverUrl] = useState<string>('');
@@ -44,6 +59,7 @@ export function MP4Editor() {
   
   const { load, loaded, loading: ffmpegLoading, progress, processing, readingProgress, editMetadata } = useFFmpegEditor();
   const { results, loading: tmdbLoading, search, clearResults, fetchDetails, fetchSeasonEpisodes } = useTmdbSearch();
+  const localBridge = useLocalBridge();
 
   const [seasons, setSeasons] = useState<any[]>([]);
   const [episodes, setEpisodes] = useState<any[]>([]);
@@ -118,45 +134,69 @@ export function MP4Editor() {
     }
   }, []);
 
-  const handleVideoSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (!file.type.includes('video/mp4') && !file.name.endsWith('.mp4')) {
-        toast({
-          title: 'Ungültiges Format',
-          description: 'Bitte nur MP4-Dateien hochladen',
-          variant: 'destructive',
-        });
-        return;
-      }
-      
-      // Check if file exceeds browser limit (2GB)
-      if (exceedsBrowserLimit(file)) {
-        toast({
-          title: 'Datei zu groß',
-          description: `Die Datei (${formatFileSize(file.size)}) überschreitet das 2GB Browser-Limit. Bitte verwenden Sie Desktop-FFmpeg für diese Datei.`,
-          variant: 'destructive',
-        });
-        // Still set the file so user can see the warning
-        setVideoFile(file);
-        return;
-      }
-      
-      setVideoFile(file);
-      const baseTitle = file.name.replace(/\.mp4$/i, '');
-      setMetadata(prev => ({
-        ...prev,
-        title: baseTitle,
-      }));
-      setOutputBlob(null);
-      
-      // Automatisch TMDB-Suche starten basierend auf Dateinamen
-      if (baseTitle.length >= 2) {
-        search(baseTitle);
-        setShowTmdbDropdown(true);
-      }
+  // Handle browser file selection from SmartFilePicker
+  const handleBrowserFileSelect = useCallback((file: File, rec: ProcessingRecommendation) => {
+    setVideoFile(file);
+    setLocalFilePath(null);
+    setRecommendation(rec);
+    setFormatInfo(getFormatCapabilities(file));
+    setProcessingMode(rec.mode === 'local' && localBridge.connected ? 'local' : 'browser');
+    
+    const baseTitle = file.name.replace(/\.[^/.]+$/, '');
+    setMetadata(prev => ({
+      ...prev,
+      title: baseTitle,
+    }));
+    setOutputBlob(null);
+    
+    // Automatisch TMDB-Suche starten basierend auf Dateinamen
+    if (baseTitle.length >= 2) {
+      search(baseTitle);
+      setShowTmdbDropdown(true);
     }
+  }, [search, localBridge.connected]);
+
+  // Handle local file selection from SmartFilePicker
+  const handleLocalFileSelect = useCallback((path: string) => {
+    setVideoFile(null);
+    setLocalFilePath(path);
+    setProcessingMode('local');
+    setRecommendation({
+      mode: 'local',
+      reason: 'Lokale Datei via PC-Modul',
+      canProcessInBrowser: false,
+      requiresLocalBridge: true,
+      showBridgePrompt: false,
+    });
+    setFormatInfo(null);
+    
+    const baseTitle = path.split(/[/\\]/).pop()?.replace(/\.[^/.]+$/, '') || '';
+    setMetadata(prev => ({
+      ...prev,
+      title: baseTitle,
+    }));
+    setOutputBlob(null);
+    
+    // Automatisch TMDB-Suche starten basierend auf Dateinamen
+    if (baseTitle.length >= 2) {
+      search(baseTitle);
+      setShowTmdbDropdown(true);
+    }
+    
+    toast({
+      title: 'Lokale Datei ausgewählt',
+      description: baseTitle,
+    });
   }, [search]);
+
+  // Clear file selection
+  const handleClearFile = useCallback(() => {
+    setVideoFile(null);
+    setLocalFilePath(null);
+    setRecommendation(null);
+    setFormatInfo(null);
+    setProcessingMode('browser');
+  }, []);
 
   const handleCoverSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -268,13 +308,46 @@ export function MP4Editor() {
   }, [fetchCoverFromUrl]);
 
   const handleProcess = useCallback(async () => {
+    // Local processing via bridge
+    if (processingMode === 'local' && localBridge.connected) {
+      // Convert metadata to local bridge format
+      const bridgeMetadata: LocalBridgeMetadata = {
+        title: metadata.title,
+        author: metadata.author,
+        show: metadata.show,
+        season: metadata.season,
+        episode: metadata.episode,
+        date: metadata.date,
+        director: metadata.director,
+        genre: metadata.genre,
+        description: metadata.description,
+      };
+      
+      const result = await localBridge.startConversion(bridgeMetadata);
+      
+      if (result.success) {
+        toast({
+          title: 'Verarbeitung abgeschlossen',
+          description: `Ausgabe: ${result.outputPath}`,
+        });
+      } else {
+        toast({
+          title: 'Fehler',
+          description: result.error,
+          variant: 'destructive',
+        });
+      }
+      return;
+    }
+
+    // Browser processing
     if (!videoFile) return;
 
     // Block processing for files over 2GB
     if (exceedsBrowserLimit(videoFile)) {
       toast({
         title: 'Datei zu groß',
-        description: `Dateien über 2GB können im Browser nicht verarbeitet werden. Bitte verwenden Sie Desktop-FFmpeg.`,
+        description: `Dateien über 2GB können im Browser nicht verarbeitet werden. Bitte starte das PC-Modul.`,
         variant: 'destructive',
       });
       return;
@@ -308,7 +381,7 @@ export function MP4Editor() {
         variant: 'destructive',
       });
     }
-  }, [videoFile, metadata, coverFile, loaded, load, editMetadata, memorySettings]);
+  }, [videoFile, metadata, coverFile, loaded, load, editMetadata, memorySettings, processingMode, localBridge]);
 
   const handleDownload = useCallback(() => {
     if (!outputBlob) return;
@@ -352,53 +425,38 @@ export function MP4Editor() {
     setSelectedTmdb(null);
   }, []);
 
+  const hasFile = videoFile || localFilePath;
+
   return (
     <div className="space-y-6">
-      {/* Video Upload */}
+      {/* Video Upload with Smart File Picker */}
       <div className="glass rounded-xl p-6">
         <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
           <FileVideo className="h-5 w-5 text-primary" />
-          MP4-Datei auswählen
+          Video-Datei auswählen
         </h3>
         
-        {!videoFile ? (
-          <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-border/50 rounded-lg cursor-pointer hover:bg-secondary/30 transition-colors">
-            <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-            <span className="text-sm text-muted-foreground">MP4-Datei hierher ziehen oder klicken</span>
-            <input
-              type="file"
-              accept="video/mp4,.mp4"
-              onChange={handleVideoSelect}
-              className="hidden"
-            />
-          </label>
-        ) : (
-          <div className="flex items-center justify-between p-4 bg-secondary/30 rounded-lg">
-            <div className="flex items-center gap-3">
-              <FileVideo className="h-8 w-8 text-primary" />
-              <div>
-                <p className="font-medium">{videoFile.name}</p>
-                <p className="text-sm text-muted-foreground">
-                  {(videoFile.size / 1024 / 1024).toFixed(2)} MB
-                </p>
-              </div>
-            </div>
-            <Button variant="ghost" size="icon" onClick={() => setVideoFile(null)}>
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
+        <SmartFilePicker
+          onFileSelect={handleBrowserFileSelect}
+          onLocalFileSelect={handleLocalFileSelect}
+          onClear={handleClearFile}
+          selectedFile={videoFile}
+          selectedLocalPath={localFilePath}
+          disabled={processing || localBridge.processing}
+        />
       </div>
 
-      {videoFile && (
+      {hasFile && (
         <>
-          {/* Memory Settings */}
-          <MemorySettings
-            settings={memorySettings}
-            onChange={handleMemorySettingsChange}
-            fileSize={videoFile.size}
-            warning={memoryWarning}
-          />
+          {/* Memory Settings - only for browser files */}
+          {videoFile && processingMode === 'browser' && (
+            <MemorySettings
+              settings={memorySettings}
+              onChange={handleMemorySettingsChange}
+              fileSize={videoFile.size}
+              warning={memoryWarning}
+            />
+          )}
 
           {/* Reading Progress */}
           {readingProgress && (
@@ -677,8 +735,19 @@ export function MP4Editor() {
             </div>
           </div>
 
-          {/* Progress */}
-          {processing && (
+          {/* Local Bridge Progress */}
+          {localBridge.processing && processingMode === 'local' && (
+            <div className="glass rounded-xl p-4">
+              <div className="flex items-center gap-3 mb-2">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <span className="text-sm">{localBridge.status}</span>
+              </div>
+              <Progress value={localBridge.progress} className="h-2" />
+            </div>
+          )}
+
+          {/* Browser Progress */}
+          {processing && processingMode === 'browser' && (
             <div className="glass rounded-xl p-4">
               <div className="flex items-center gap-3 mb-2">
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
@@ -692,23 +761,28 @@ export function MP4Editor() {
           <div className="flex gap-3">
             <Button
               onClick={handleProcess}
-              disabled={processing || !videoFile}
+              disabled={processing || localBridge.processing || !hasFile || (processingMode === 'local' && !localBridge.connected)}
               className="flex-1 bg-gradient-to-r from-primary to-accent hover:opacity-90"
             >
-              {processing ? (
+              {processing || localBridge.processing ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                   Verarbeite...
                 </>
               ) : (
                 <>
-                  <Save className="h-4 w-4 mr-2" />
+                  {processingMode === 'local' ? (
+                    <Monitor className="h-4 w-4 mr-2" />
+                  ) : (
+                    <Save className="h-4 w-4 mr-2" />
+                  )}
                   Metadaten einbetten
+                  {processingMode === 'local' && ' (Lokal)'}
                 </>
               )}
             </Button>
 
-            {outputBlob && (
+            {outputBlob && processingMode === 'browser' && (
               <Button onClick={handleDownload} variant="secondary">
                 <Download className="h-4 w-4 mr-2" />
                 Download
