@@ -11,6 +11,13 @@ import { useTmdbSearch, type TmdbResult } from '@/hooks/useTmdbSearch';
 import type { ConversionMetadata } from '@/types/converter';
 import { supabase } from '@/integrations/supabase/client';
 import JSZip from 'jszip';
+import { MemorySettings } from './MemorySettings';
+import { 
+  loadMemorySettings, 
+  saveMemorySettings, 
+  getMemoryWarning,
+  type MemorySettings as MemorySettingsType 
+} from '@/lib/chunked-file-reader';
 
 interface BatchFile {
   id: string;
@@ -33,9 +40,26 @@ export function BatchMP4Editor() {
   const [files, setFiles] = useState<BatchFile[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isProcessingBatch, setIsProcessingBatch] = useState(false);
+  const [memorySettings, setMemorySettings] = useState<MemorySettingsType>(loadMemorySettings);
   
-  const { load, loaded, loading: ffmpegLoading, editMetadata } = useFFmpegEditor();
+  const { load, loaded, loading: ffmpegLoading, editMetadata, readingProgress } = useFFmpegEditor();
   const tmdbHook = useTmdbSearch();
+
+  // Save memory settings when changed
+  const handleMemorySettingsChange = useCallback((newSettings: MemorySettingsType) => {
+    setMemorySettings(newSettings);
+    saveMemorySettings(newSettings);
+  }, []);
+
+  // Check for large files
+  const hasLargeFiles = files.some(f => f.file.size > 500 * 1024 * 1024);
+  const largestFileWarning = files.reduce((warning, f) => {
+    const fileWarning = getMemoryWarning(f.file);
+    if (fileWarning && (!warning || f.file.size > 1.5 * 1024 * 1024 * 1024)) {
+      return fileWarning;
+    }
+    return warning;
+  }, null as string | null);
 
   // Fetch cover image from URL
   const fetchCoverFromUrl = useCallback(async (url: string): Promise<File | null> => {
@@ -337,7 +361,8 @@ export function BatchMP4Editor() {
               setFiles(prev => prev.map(f => 
                 f.id === batchFile.id ? { ...f, progress } : f
               ));
-            }
+            },
+            memorySettings
           );
 
           setFiles(prev => prev.map(f => 
@@ -507,6 +532,32 @@ export function BatchMP4Editor() {
           />
         </label>
       </div>
+
+      {/* Memory Settings */}
+      {files.length > 0 && (
+        <MemorySettings
+          settings={memorySettings}
+          onChange={handleMemorySettingsChange}
+          fileSize={files.reduce((max, f) => Math.max(max, f.file.size), 0)}
+          warning={largestFileWarning}
+        />
+      )}
+
+      {/* Reading Progress */}
+      {readingProgress && (
+        <div className="glass rounded-xl p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium">Datei wird gelesen...</span>
+            <span className="text-sm text-muted-foreground">
+              Chunk {readingProgress.chunkIndex}/{readingProgress.totalChunks}
+            </span>
+          </div>
+          <Progress value={readingProgress.percent} className="h-2" />
+          <p className="text-xs text-muted-foreground mt-1">
+            {(readingProgress.bytesRead / 1024 / 1024).toFixed(0)} MB / {(readingProgress.totalBytes / 1024 / 1024).toFixed(0)} MB
+          </p>
+        </div>
+      )}
 
       {/* File List */}
       {files.length > 0 && (
