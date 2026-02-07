@@ -35,6 +35,7 @@ export interface LocalBridgeStartPayload {
   genre: string;
   description: string;
   cover: string | null;
+  overwrite: boolean;
 }
 
 export const useLocalBridge = () => {
@@ -140,15 +141,23 @@ export const useLocalBridge = () => {
 
   const pollStatus = useCallback(async (): Promise<void> => {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const response = await fetch(`${API_BASE}/status`, {
         method: 'GET',
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
+        console.warn('Status poll response not ok:', response.status);
         return;
       }
 
       const data = await response.json();
+      console.log('Status poll response:', data);
       
       updateState({
         progress: data.percent || 0,
@@ -160,7 +169,7 @@ export const useLocalBridge = () => {
         updateState({
           processing: false,
           progress: 100,
-          progressMessage: '',
+          progressMessage: 'Fertig!',
           status: 'Verarbeitung abgeschlossen!',
           error: null,
         });
@@ -175,12 +184,16 @@ export const useLocalBridge = () => {
         });
       }
     } catch (err) {
-      console.error('Status polling error:', err);
+      // Don't stop polling on transient errors, just log them
+      console.warn('Status polling error (will retry):', err);
     }
   }, [updateState, stopStatusPolling]);
 
   const startStatusPolling = useCallback(() => {
+    console.log('Starting status polling...');
     stopStatusPolling();
+    // Poll immediately, then every second
+    pollStatus();
     statusPollingRef.current = setInterval(pollStatus, 1000);
   }, [pollStatus, stopStatusPolling]);
 
@@ -197,6 +210,7 @@ export const useLocalBridge = () => {
     filePath: string,
     metadata: LocalBridgeMetadata,
     coverFile?: File,
+    overwrite: boolean = false,
   ): Promise<{ success: boolean; error?: string }> => {
     if (!state.connected) {
       return { success: false, error: 'Nicht mit PC-Modul verbunden' };
@@ -210,7 +224,7 @@ export const useLocalBridge = () => {
       updateState({ 
         processing: true, 
         progress: 0,
-        progressMessage: '',
+        progressMessage: 'Starte...',
         status: 'Starte Verarbeitung...',
         error: null 
       });
@@ -232,7 +246,10 @@ export const useLocalBridge = () => {
         genre: metadata.genre || '',
         description: metadata.description || '',
         cover: coverBase64,
+        overwrite: overwrite,
       };
+
+      console.log('Sending start request with payload:', { ...payload, cover: payload.cover ? '[BASE64]' : null });
 
       const response = await fetch(`${API_BASE}/start`, {
         method: 'POST',
@@ -247,12 +264,17 @@ export const useLocalBridge = () => {
         throw new Error(errorData.error || 'Verarbeitung fehlgeschlagen');
       }
 
-      // Start polling for status
+      const responseData = await response.json().catch(() => ({}));
+      console.log('Start response:', responseData);
+
+      // IMPORTANT: Start polling for status IMMEDIATELY after successful start
+      console.log('Starting status polling immediately after /start success');
       startStatusPolling();
 
       return { success: true };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unbekannter Fehler';
+      console.error('Start conversion error:', err);
       updateState({ 
         processing: false, 
         progress: 0,

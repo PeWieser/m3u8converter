@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Image, Download, Loader2, Trash2, Save, Film, Tv, User, Calendar, Tag, FileText, Link, Upload, Monitor, Globe, FileVideo } from 'lucide-react';
+import { Image, Download, Loader2, Trash2, Save, Film, Tv, User, Calendar, Tag, FileText, Link, Upload, Monitor, Globe, FileVideo, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -56,6 +56,7 @@ export function MP4Editor() {
   const [showTmdbDropdown, setShowTmdbDropdown] = useState(false);
   const [memorySettings, setMemorySettings] = useState<MemorySettingsType>(loadMemorySettings);
   const [memoryWarning, setMemoryWarning] = useState<string | null>(null);
+  const [overwriteOriginal, setOverwriteOriginal] = useState(false);
   
   const { load, loaded, loading: ffmpegLoading, progress, processing, readingProgress, editMetadata } = useFFmpegEditor();
   const { results, loading: tmdbLoading, search, clearResults, fetchDetails, fetchSeasonEpisodes } = useTmdbSearch();
@@ -322,7 +323,13 @@ export function MP4Editor() {
         description: metadata.description,
       };
       
-      const result = await localBridge.startConversion(localFilePath, bridgeMetadata, coverFile || undefined);
+      // Pass overwrite flag to local conversion
+      const result = await localBridge.startConversion(
+        localFilePath, 
+        bridgeMetadata, 
+        coverFile || undefined,
+        overwriteOriginal
+      );
       
       if (result.success) {
         toast({
@@ -380,7 +387,7 @@ export function MP4Editor() {
         variant: 'destructive',
       });
     }
-  }, [videoFile, metadata, coverFile, loaded, load, editMetadata, memorySettings, processingMode, localBridge]);
+  }, [videoFile, metadata, coverFile, loaded, load, editMetadata, memorySettings, processingMode, localBridge, localFilePath, overwriteOriginal]);
 
   const handleDownload = useCallback(() => {
     if (!outputBlob) return;
@@ -734,14 +741,42 @@ export function MP4Editor() {
             </div>
           </div>
 
+          {/* Overwrite Option - Only for local processing */}
+          {processingMode === 'local' && localBridge.connected && (
+            <div className="glass rounded-xl p-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={overwriteOriginal}
+                  onChange={(e) => setOverwriteOriginal(e.target.checked)}
+                  className="h-4 w-4 rounded border-border bg-secondary accent-primary"
+                />
+                <div className="flex-1">
+                  <span className="text-sm font-medium">Original überschreiben</span>
+                  <p className="text-xs text-muted-foreground">
+                    {overwriteOriginal 
+                      ? 'Die Originaldatei wird ersetzt' 
+                      : 'Eine neue Datei wird erstellt (_metadata Suffix)'}
+                  </p>
+                </div>
+                {overwriteOriginal && (
+                  <AlertTriangle className="h-4 w-4 text-destructive" />
+                )}
+              </label>
+            </div>
+          )}
+
           {/* Local Bridge Progress */}
           {localBridge.processing && processingMode === 'local' && (
             <div className="glass rounded-xl p-4">
               <div className="flex items-center gap-3 mb-2">
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                <span className="text-sm">{localBridge.status}</span>
+                <span className="text-sm font-medium">{localBridge.progressMessage || localBridge.status}</span>
               </div>
               <Progress value={localBridge.progress} className="h-2" />
+              <p className="text-xs text-muted-foreground mt-1 text-center">
+                {localBridge.progress}%
+              </p>
             </div>
           )}
 
