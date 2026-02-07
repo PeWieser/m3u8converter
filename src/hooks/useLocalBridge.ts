@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { addGlobalLog } from '@/components/converter/GlobalLogWindow';
 
 const API_BASE = 'http://127.0.0.1:5001';
 
@@ -38,6 +39,15 @@ export interface LocalBridgeStartPayload {
   overwrite: boolean;
 }
 
+interface LocalLogEntry {
+  time: string;
+  text: string;
+  color: string;
+}
+
+// Track which logs we've already sent to avoid duplicates
+let lastLogCount = 0;
+
 export const useLocalBridge = () => {
   const [state, setState] = useState<LocalBridgeState>({
     connected: false,
@@ -52,6 +62,7 @@ export const useLocalBridge = () => {
 
   const checkIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const statusPollingRef = useRef<NodeJS.Timeout | null>(null);
+  const isPollingRef = useRef(false);
 
   const updateState = useCallback((updates: Partial<LocalBridgeState>) => {
     setState(prev => ({ ...prev, ...updates }));
@@ -137,12 +148,57 @@ export const useLocalBridge = () => {
       clearInterval(statusPollingRef.current);
       statusPollingRef.current = null;
     }
+    isPollingRef.current = false;
+    lastLogCount = 0; // Reset log counter when stopping
+  }, []);
+
+  const fetchLogs = useCallback(async (): Promise<void> => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      
+      const response = await fetch(`${API_BASE}/logs`, {
+        method: 'GET',
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        return;
+      }
+
+      const logs: LocalLogEntry[] = await response.json();
+      
+      // Only add new logs (compare by count to avoid duplicates)
+      if (logs.length > lastLogCount) {
+        const newLogs = logs.slice(lastLogCount);
+        newLogs.forEach((log) => {
+          // Determine log type based on color or content
+          let logType: 'info' | 'success' | 'warning' | 'error' | 'ffmpeg' = 'ffmpeg';
+          if (log.color === '#ff5555' || log.text.toLowerCase().includes('error')) {
+            logType = 'error';
+          } else if (log.color === '#50fa7b' || log.text.toLowerCase().includes('success') || log.text.toLowerCase().includes('done')) {
+            logType = 'success';
+          } else if (log.color === '#f1fa8c' || log.text.toLowerCase().includes('warn')) {
+            logType = 'warning';
+          }
+          
+          addGlobalLog(logType, log.text, 'PC-Modul');
+        });
+        lastLogCount = logs.length;
+      }
+    } catch {
+      // Silently ignore log fetch errors
+    }
   }, []);
 
   const pollStatus = useCallback(async (): Promise<void> => {
+    if (!isPollingRef.current) return;
+    
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
       
       const response = await fetch(`${API_BASE}/status`, {
         method: 'GET',
@@ -159,12 +215,18 @@ export const useLocalBridge = () => {
       const data = await response.json();
       console.log('Status poll response:', data);
       
+      // Update progress and message
       updateState({
         progress: data.percent || 0,
         progressMessage: data.message || '',
+        status: data.message || 'Verarbeite...',
       });
 
+      // Also fetch logs
+      await fetchLogs();
+
       if (data.status === 'done') {
+        addGlobalLog('success', 'Verarbeitung erfolgreich abgeschlossen!', 'PC-Modul');
         stopStatusPolling();
         updateState({
           processing: false,
@@ -174,6 +236,7 @@ export const useLocalBridge = () => {
           error: null,
         });
       } else if (data.status === 'error') {
+        addGlobalLog('error', data.message || 'Verarbeitung fehlgeschlagen', 'PC-Modul');
         stopStatusPolling();
         updateState({
           processing: false,
@@ -187,14 +250,17 @@ export const useLocalBridge = () => {
       // Don't stop polling on transient errors, just log them
       console.warn('Status polling error (will retry):', err);
     }
-  }, [updateState, stopStatusPolling]);
+  }, [updateState, stopStatusPolling, fetchLogs]);
 
   const startStatusPolling = useCallback(() => {
     console.log('Starting status polling...');
     stopStatusPolling();
-    // Poll immediately, then every second
+    isPollingRef.current = true;
+    lastLogCount = 0; // Reset log counter
+    
+    // Poll immediately, then every 500ms (faster for smoother updates)
     pollStatus();
-    statusPollingRef.current = setInterval(pollStatus, 1000);
+    statusPollingRef.current = setInterval(pollStatus, 500);
   }, [pollStatus, stopStatusPolling]);
 
   const fileToBase64 = useCallback(async (file: File): Promise<string> => {
@@ -221,6 +287,9 @@ export const useLocalBridge = () => {
     }
 
     try {
+      // Reset state for new conversion
+      lastLogCount = 0;
+      
       updateState({ 
         processing: true, 
         progress: 0,
@@ -229,10 +298,13 @@ export const useLocalBridge = () => {
         error: null 
       });
 
+      addGlobalLog('info', `Starte lokale Verarbeitung: ${filePath.split(/[/\\]/).pop()}`, 'PC-Modul');
+
       // Convert cover file to base64 if provided
       let coverBase64: string | null = null;
       if (coverFile) {
         coverBase64 = await fileToBase64(coverFile);
+        addGlobalLog('info', 'Cover-Bild wird eingebettet', 'PC-Modul');
       }
 
       const payload: LocalBridgeStartPayload = {
@@ -267,7 +339,9 @@ export const useLocalBridge = () => {
       const responseData = await response.json().catch(() => ({}));
       console.log('Start response:', responseData);
 
-      // IMPORTANT: Start polling for status IMMEDIATELY after successful start
+      addGlobalLog('info', 'Verarbeitung gestartet, warte auf Fortschritt...', 'PC-Modul');
+
+      // Start polling for status IMMEDIATELY after successful start
       console.log('Starting status polling immediately after /start success');
       startStatusPolling();
 
@@ -275,6 +349,7 @@ export const useLocalBridge = () => {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unbekannter Fehler';
       console.error('Start conversion error:', err);
+      addGlobalLog('error', `Fehler beim Starten: ${message}`, 'PC-Modul');
       updateState({ 
         processing: false, 
         progress: 0,
