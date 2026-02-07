@@ -105,9 +105,14 @@ export const LocalBridge = () => {
             </Button>
           </div>
 
-          <p className="text-xs text-muted-foreground">
-            Nach dem Download: Starte <code className="bg-muted px-1 rounded">ffmpegserver.exe</code> und lade diese Seite neu.
-          </p>
+          <div className="text-xs text-muted-foreground space-y-1">
+            <p>
+              <strong>Wichtig:</strong> Nach dem Download die Datei <code className="bg-muted px-1 rounded">ffmpegserver.exe</code> einmalig mit <span className="text-amber-400 font-medium">Administratorrechten</span> starten (Rechtsklick → "Als Administrator ausführen").
+            </p>
+            <p>
+              Danach kann das Modul normal gestartet werden.
+            </p>
+          </div>
         </div>
       )}
 
