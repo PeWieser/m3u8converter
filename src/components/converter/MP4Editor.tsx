@@ -756,7 +756,7 @@ export function MP4Editor() {
                   <p className="text-xs text-muted-foreground">
                     {overwriteOriginal 
                       ? 'Die Originaldatei wird ersetzt' 
-                      : 'Eine neue Datei wird erstellt (_metadata Suffix)'}
+                      : 'Die Datei wird im Unterordner /converted gespeichert (wird erstellt falls nicht vorhanden)'}
                   </p>
                 </div>
                 {overwriteOriginal && (
@@ -768,15 +768,29 @@ export function MP4Editor() {
 
           {/* Local Bridge Progress */}
           {localBridge.processing && processingMode === 'local' && (
-            <div className="glass rounded-xl p-4">
+            <div className="glass rounded-xl p-4 border border-primary/30">
               <div className="flex items-center gap-3 mb-2">
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                <span className="text-sm font-medium">{localBridge.progressMessage || localBridge.status}</span>
+                <span className="text-sm font-medium text-primary">
+                  Verarbeitung läuft: {localBridge.progressMessage || localBridge.status}
+                </span>
               </div>
               <Progress value={localBridge.progress} className="h-2" />
               <p className="text-xs text-muted-foreground mt-1 text-center">
                 {localBridge.progress}%
               </p>
+            </div>
+          )}
+
+          {/* Local Bridge Success Message */}
+          {!localBridge.processing && localBridge.progress === 100 && processingMode === 'local' && (
+            <div className="glass rounded-xl p-4 border border-green-500/30 bg-green-500/10">
+              <div className="flex items-center gap-3">
+                <Save className="h-5 w-5 text-green-400" />
+                <span className="text-sm font-medium text-green-400">
+                  Verarbeitung abgeschlossen! Die Datei wurde erfolgreich gespeichert.
+                </span>
+              </div>
             </div>
           )}
 
