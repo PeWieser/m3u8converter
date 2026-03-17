@@ -769,7 +769,7 @@ export function MP4Editor() {
 
           {/* Overwrite Option - Only for local processing */}
           {processingMode === 'local' && localBridge.connected && (
-            <div className="glass rounded-xl p-4">
+            <div className="glass rounded-xl p-4 space-y-4">
               <label className="flex items-center gap-3 cursor-pointer">
                 <input
                   type="checkbox"
@@ -782,13 +782,29 @@ export function MP4Editor() {
                   <p className="text-xs text-muted-foreground">
                     {overwriteOriginal 
                       ? 'Die Originaldatei wird ersetzt' 
-                      : 'Die Datei wird im Unterordner /converted gespeichert (wird erstellt falls nicht vorhanden)'}
+                      : `Die Datei wird im Unterordner /${outputFolder} gespeichert (wird erstellt falls nicht vorhanden)`}
                   </p>
                 </div>
                 {overwriteOriginal && (
                   <AlertTriangle className="h-4 w-4 text-destructive" />
                 )}
               </label>
+
+              {!overwriteOriginal && (
+                <div className="flex items-center gap-3">
+                  <label className="text-sm text-muted-foreground whitespace-nowrap">Ausgabeordner:</label>
+                  <Input
+                    value={outputFolder}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[<>:"|?*]/g, '');
+                      setOutputFolder(val);
+                      localStorage.setItem('outputFolder', val);
+                    }}
+                    placeholder="converted"
+                    className="bg-secondary/50 border-border/50 h-8 text-sm"
+                  />
+                </div>
+              )}
             </div>
           )}
 
