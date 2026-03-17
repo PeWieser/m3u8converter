@@ -64,6 +64,7 @@ export function MP4Editor() {
   const [memorySettings, setMemorySettings] = useState<MemorySettingsType>(loadMemorySettings);
   const [memoryWarning, setMemoryWarning] = useState<string | null>(null);
   const [overwriteOriginal, setOverwriteOriginal] = useState(false);
+  const [encodingSettings, setEncodingSettings] = useState<EncodingSettingsType>(loadEncodingSettings);
   
   const { load, loaded, loading: ffmpegLoading, progress, processing, readingProgress, editMetadata } = useFFmpegEditor();
   const { results, loading: tmdbLoading, search, clearResults, fetchDetails, fetchSeasonEpisodes } = useTmdbSearch();
