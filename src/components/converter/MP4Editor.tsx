@@ -12,6 +12,7 @@ import type { ConversionMetadata } from '@/types/converter';
 import { supabase } from '@/integrations/supabase/client';
 import { MemorySettings } from './MemorySettings';
 import { SmartFilePicker } from './SmartFilePicker';
+import { EncodingSettings } from './EncodingSettings';
 import { useLocalBridge, type LocalBridgeMetadata } from '@/hooks/useLocalBridge';
 import { 
   loadMemorySettings, 
@@ -29,6 +30,12 @@ import {
   getProcessingRecommendation,
   type ProcessingRecommendation 
 } from '@/lib/processing-mode';
+import {
+  type EncodingSettings as EncodingSettingsType,
+  loadEncodingSettings,
+  saveEncodingSettings,
+  buildEncodingArgs,
+} from '@/types/encoding';
 
 export function MP4Editor() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
