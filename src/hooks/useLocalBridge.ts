@@ -278,6 +278,7 @@ export const useLocalBridge = () => {
     metadata: LocalBridgeMetadata,
     coverFile?: File,
     overwrite: boolean = false,
+    outputFolder: string = 'converted',
   ): Promise<{ success: boolean; error?: string }> => {
     if (!state.connected) {
       return { success: false, error: 'Nicht mit PC-Modul verbunden' };
