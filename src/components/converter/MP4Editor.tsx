@@ -848,7 +848,7 @@ export function MP4Editor() {
                   ) : (
                     <Save className="h-4 w-4 mr-2" />
                   )}
-                  Metadaten einbetten
+                  {encodingSettings.enabled && processingMode === 'browser' ? 'Konvertieren' : 'Metadaten einbetten'}
                   {processingMode === 'local' && ' (Lokal)'}
                 </>
               )}
