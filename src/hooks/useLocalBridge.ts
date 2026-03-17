@@ -321,6 +321,7 @@ export const useLocalBridge = () => {
         description: metadata.description || '',
         cover: coverBase64,
         overwrite: overwrite,
+        outputFolder: outputFolder,
       };
 
       console.log('Sending start request with payload:', { ...payload, cover: payload.cover ? '[BASE64]' : null });
