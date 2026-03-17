@@ -343,7 +343,8 @@ export function MP4Editor() {
         localFilePath, 
         bridgeMetadata, 
         coverFile || undefined,
-        overwriteOriginal
+        overwriteOriginal,
+        outputFolder
       );
       
       if (result.success) {
