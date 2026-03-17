@@ -479,6 +479,15 @@ export function MP4Editor() {
             />
           )}
 
+          {/* Encoding Settings */}
+          {processingMode === 'browser' && (
+            <EncodingSettings
+              settings={encodingSettings}
+              onChange={handleEncodingSettingsChange}
+              disabled={processing || localBridge.processing}
+            />
+          )}
+
           {/* Reading Progress */}
           {readingProgress && (
             <div className="glass rounded-xl p-4">
