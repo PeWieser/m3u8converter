@@ -383,16 +383,17 @@ export function MP4Editor() {
       }
 
       toast({
-        title: 'Verarbeitung gestartet',
-        description: 'Metadaten werden eingebettet...',
+        title: encodingSettings.enabled ? 'Konvertierung gestartet' : 'Verarbeitung gestartet',
+        description: encodingSettings.enabled ? 'Video wird konvertiert...' : 'Metadaten werden eingebettet...',
       });
 
-      const blob = await editMetadata(videoFile, metadata, coverFile || undefined, undefined, memorySettings);
+      const encodingArgs = buildEncodingArgs(encodingSettings);
+      const blob = await editMetadata(videoFile, metadata, coverFile || undefined, undefined, memorySettings, encodingArgs);
       setOutputBlob(blob);
 
       toast({
         title: 'Fertig!',
-        description: 'Die Datei wurde erfolgreich bearbeitet.',
+        description: encodingSettings.enabled ? 'Video wurde erfolgreich konvertiert.' : 'Die Datei wurde erfolgreich bearbeitet.',
       });
     } catch (error) {
       toast({
