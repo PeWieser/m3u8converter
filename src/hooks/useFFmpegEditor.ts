@@ -217,8 +217,12 @@ export function useFFmpegEditor() {
         args.push('-map', '1');
       }
 
-      // Copy streams without re-encoding (fast!)
-      args.push('-c', 'copy');
+      // Copy streams or encode based on encoding args
+      if (encodingArgs && encodingArgs.length > 0) {
+        args.push(...encodingArgs);
+      } else {
+        args.push('-c', 'copy');
+      }
 
       // Set cover image disposition if present
       if (hasCover) {
