@@ -37,6 +37,7 @@ export interface LocalBridgeStartPayload {
   description: string;
   cover: string | null;
   overwrite: boolean;
+  outputFolder: string;
 }
 
 interface LocalLogEntry {
@@ -277,6 +278,7 @@ export const useLocalBridge = () => {
     metadata: LocalBridgeMetadata,
     coverFile?: File,
     overwrite: boolean = false,
+    outputFolder: string = 'converted',
   ): Promise<{ success: boolean; error?: string }> => {
     if (!state.connected) {
       return { success: false, error: 'Nicht mit PC-Modul verbunden' };
@@ -319,6 +321,7 @@ export const useLocalBridge = () => {
         description: metadata.description || '',
         cover: coverBase64,
         overwrite: overwrite,
+        outputFolder: outputFolder,
       };
 
       console.log('Sending start request with payload:', { ...payload, cover: payload.cover ? '[BASE64]' : null });
