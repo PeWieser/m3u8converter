@@ -296,7 +296,7 @@ const Index = () => {
               </TabsTrigger>
               <TabsTrigger value="editor" className="data-[state=active]:bg-primary/20 gap-2">
                 <Edit className="h-4 w-4" />
-                MP4 Editor
+                Video Converter
               </TabsTrigger>
             </TabsList>
 

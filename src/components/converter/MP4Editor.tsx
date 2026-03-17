@@ -12,6 +12,7 @@ import type { ConversionMetadata } from '@/types/converter';
 import { supabase } from '@/integrations/supabase/client';
 import { MemorySettings } from './MemorySettings';
 import { SmartFilePicker } from './SmartFilePicker';
+import { EncodingSettings } from './EncodingSettings';
 import { useLocalBridge, type LocalBridgeMetadata } from '@/hooks/useLocalBridge';
 import { 
   loadMemorySettings, 
@@ -29,6 +30,12 @@ import {
   getProcessingRecommendation,
   type ProcessingRecommendation 
 } from '@/lib/processing-mode';
+import {
+  type EncodingSettings as EncodingSettingsType,
+  loadEncodingSettings,
+  saveEncodingSettings,
+  buildEncodingArgs,
+} from '@/types/encoding';
 
 export function MP4Editor() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -57,6 +64,7 @@ export function MP4Editor() {
   const [memorySettings, setMemorySettings] = useState<MemorySettingsType>(loadMemorySettings);
   const [memoryWarning, setMemoryWarning] = useState<string | null>(null);
   const [overwriteOriginal, setOverwriteOriginal] = useState(false);
+  const [encodingSettings, setEncodingSettings] = useState<EncodingSettingsType>(loadEncodingSettings);
   
   const { load, loaded, loading: ffmpegLoading, progress, processing, readingProgress, editMetadata } = useFFmpegEditor();
   const { results, loading: tmdbLoading, search, clearResults, fetchDetails, fetchSeasonEpisodes } = useTmdbSearch();
@@ -79,6 +87,12 @@ export function MP4Editor() {
   const handleMemorySettingsChange = useCallback((newSettings: MemorySettingsType) => {
     setMemorySettings(newSettings);
     saveMemorySettings(newSettings);
+  }, []);
+
+  // Save encoding settings when changed
+  const handleEncodingSettingsChange = useCallback((newSettings: EncodingSettingsType) => {
+    setEncodingSettings(newSettings);
+    saveEncodingSettings(newSettings);
   }, []);
 
   // Fetch cover image from URL (handles CORS via proxy for TMDB)
@@ -369,16 +383,17 @@ export function MP4Editor() {
       }
 
       toast({
-        title: 'Verarbeitung gestartet',
-        description: 'Metadaten werden eingebettet...',
+        title: encodingSettings.enabled ? 'Konvertierung gestartet' : 'Verarbeitung gestartet',
+        description: encodingSettings.enabled ? 'Video wird konvertiert...' : 'Metadaten werden eingebettet...',
       });
 
-      const blob = await editMetadata(videoFile, metadata, coverFile || undefined, undefined, memorySettings);
+      const encodingArgs = buildEncodingArgs(encodingSettings);
+      const blob = await editMetadata(videoFile, metadata, coverFile || undefined, undefined, memorySettings, encodingArgs);
       setOutputBlob(blob);
 
       toast({
         title: 'Fertig!',
-        description: 'Die Datei wurde erfolgreich bearbeitet.',
+        description: encodingSettings.enabled ? 'Video wurde erfolgreich konvertiert.' : 'Die Datei wurde erfolgreich bearbeitet.',
       });
     } catch (error) {
       toast({
@@ -461,6 +476,15 @@ export function MP4Editor() {
               onChange={handleMemorySettingsChange}
               fileSize={videoFile.size}
               warning={memoryWarning}
+            />
+          )}
+
+          {/* Encoding Settings */}
+          {processingMode === 'browser' && (
+            <EncodingSettings
+              settings={encodingSettings}
+              onChange={handleEncodingSettingsChange}
+              disabled={processing || localBridge.processing}
             />
           )}
 
@@ -824,7 +848,7 @@ export function MP4Editor() {
                   ) : (
                     <Save className="h-4 w-4 mr-2" />
                   )}
-                  Metadaten einbetten
+                  {encodingSettings.enabled && processingMode === 'browser' ? 'Konvertieren' : 'Metadaten einbetten'}
                   {processingMode === 'local' && ' (Lokal)'}
                 </>
               )}
