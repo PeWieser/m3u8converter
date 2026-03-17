@@ -89,6 +89,12 @@ export function MP4Editor() {
     saveMemorySettings(newSettings);
   }, []);
 
+  // Save encoding settings when changed
+  const handleEncodingSettingsChange = useCallback((newSettings: EncodingSettingsType) => {
+    setEncodingSettings(newSettings);
+    saveEncodingSettings(newSettings);
+  }, []);
+
   // Fetch cover image from URL (handles CORS via proxy for TMDB)
   const fetchCoverFromUrl = useCallback(async (url: string): Promise<File | null> => {
     if (!url) return null;
