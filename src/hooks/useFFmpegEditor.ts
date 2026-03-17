@@ -76,7 +76,8 @@ export function useFFmpegEditor() {
     metadata: ConversionMetadata,
     coverFile?: File,
     onProgress?: (progress: number) => void,
-    memorySettings?: MemorySettings
+    memorySettings?: MemorySettings,
+    encodingArgs?: string[]
   ): Promise<Blob> => {
     if (!ffmpegRef.current) {
       throw new Error('FFmpeg not loaded');
