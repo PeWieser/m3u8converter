@@ -37,6 +37,7 @@ export interface LocalBridgeStartPayload {
   description: string;
   cover: string | null;
   overwrite: boolean;
+  outputFolder: string;
 }
 
 interface LocalLogEntry {
