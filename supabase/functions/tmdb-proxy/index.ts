@@ -225,7 +225,7 @@ serve(async (req) => {
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
-        url = `${TMDB_BASE_URL}/movie/${validId}?api_key=${TMDB_API_KEY}&language=de-DE&append_to_response=credits`;
+        url = `${TMDB_BASE_URL}/movie/${validId}?api_key=${TMDB_API_KEY}&language=${tmdbLanguage}&append_to_response=credits`;
         break;
       }
 
