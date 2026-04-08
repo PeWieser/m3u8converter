@@ -107,6 +107,12 @@ export function MetadataEditor({
       const eps = await fetchSeasonEpisodes(selectedTmdb.id, season);
       setEpisodes(eps);
       setLoadingEpisodes(false);
+      
+      // Fetch season-specific cover
+      const seasonImages = await fetchSeasonImages(selectedTmdb.id, season);
+      if (seasonImages.length > 0) {
+        onChange({ thumbnail: seasonImages[0].url });
+      }
     }
   };
 
