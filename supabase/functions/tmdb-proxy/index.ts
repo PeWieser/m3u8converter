@@ -98,7 +98,10 @@ serve(async (req) => {
       );
     }
 
-    const { action, query, id, type, seasonNumber, imageUrl } = body;
+    const { action, query, id, type, seasonNumber, imageUrl, language } = body;
+    
+    // Determine language for TMDB API calls (default: de-DE)
+    const tmdbLanguage = language && typeof language === 'string' ? language : 'de-DE';
 
     // Validate action parameter
     if (!action || typeof action !== 'string') {
