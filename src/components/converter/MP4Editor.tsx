@@ -817,7 +817,63 @@ export function MP4Editor() {
             </div>
           </div>
 
-          {/* Overwrite Option - Only for local processing */}
+          {/* Filename Renaming Settings */}
+          <div className="glass rounded-xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Settings2 className="h-4 w-4 text-primary" />
+                Dateiname automatisch umbenennen
+              </h3>
+              <Switch
+                checked={renameEnabled}
+                onCheckedChange={(v) => {
+                  setRenameEnabled(v);
+                  localStorage.setItem('renameEnabled', String(v));
+                }}
+              />
+            </div>
+            
+            {renameEnabled && (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Film-Schema</Label>
+                  <Input
+                    value={moviePattern}
+                    onChange={(e) => {
+                      setMoviePattern(e.target.value);
+                      localStorage.setItem('moviePattern', e.target.value);
+                    }}
+                    placeholder="{title} ({year})"
+                    className="bg-secondary/50 border-border/50 h-8 text-sm font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Serien-Schema</Label>
+                  <Input
+                    value={tvPattern}
+                    onChange={(e) => {
+                      setTvPattern(e.target.value);
+                      localStorage.setItem('tvPattern', e.target.value);
+                    }}
+                    placeholder="{show} - S{season}E{episode} - {title} ({year})"
+                    className="bg-secondary/50 border-border/50 h-8 text-sm font-mono"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Platzhalter: <code className="text-primary">{'{title}'}</code> <code className="text-primary">{'{show}'}</code> <code className="text-primary">{'{season}'}</code> <code className="text-primary">{'{episode}'}</code> <code className="text-primary">{'{year}'}</code> <code className="text-primary">{'{genre}'}</code> <code className="text-primary">{'{director}'}</code>
+                </p>
+                {/* Preview */}
+                <div className="rounded-lg bg-secondary/30 p-2">
+                  <span className="text-xs text-muted-foreground">Vorschau: </span>
+                  <span className="text-xs font-medium">
+                    {buildFilename(metadata, (metadata.show && metadata.season && metadata.episode) ? tvPattern : moviePattern)}.mp4
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+
           {processingMode === 'local' && localBridge.connected && (
             <div className="glass rounded-xl p-4 space-y-4">
               <label className="flex items-center gap-3 cursor-pointer">
