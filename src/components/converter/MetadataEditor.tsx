@@ -32,7 +32,7 @@ export function MetadataEditor({
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [selectedEpisode, setSelectedEpisode] = useState<number | null>(null);
   const [loadingEpisodes, setLoadingEpisodes] = useState(false);
-  const { results, loading, search, clearResults, fetchDetails, fetchSeasonEpisodes } = useTmdbSearch();
+  const { results, loading, search, clearResults, fetchDetails, fetchSeasonEpisodes, fetchSeasonImages } = useTmdbSearch();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
