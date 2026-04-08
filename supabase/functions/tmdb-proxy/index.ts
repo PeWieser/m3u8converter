@@ -108,7 +108,7 @@ serve(async (req) => {
       );
     }
 
-    const validActions = ['search', 'movie-details', 'tv-details', 'season-episodes', 'proxy-image'];
+    const validActions = ['search', 'movie-details', 'tv-details', 'season-episodes', 'season-images', 'proxy-image'];
     if (!validActions.includes(action)) {
       console.warn(`Invalid action attempted: ${action}`);
       return new Response(
