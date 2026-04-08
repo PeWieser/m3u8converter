@@ -629,10 +629,25 @@ export function MP4Editor() {
 
           {/* Metadata Editor */}
           <div className="glass rounded-xl p-6 space-y-4">
-            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <FileText className="h-5 w-5 text-primary" />
-              Metadaten
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <FileText className="h-5 w-5 text-primary" />
+                Metadaten
+              </h3>
+              <div className="flex items-center gap-2">
+                <Languages className="h-4 w-4 text-muted-foreground" />
+                <Select value={language} onValueChange={setLanguage}>
+                  <SelectTrigger className="w-[140px] h-8 text-xs bg-secondary/50 border-border/50">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TMDB_LANGUAGES.map(l => (
+                      <SelectItem key={l.code} value={l.code}>{l.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
 
             {/* Title with TMDB Search */}
             <div className="space-y-2 relative">
