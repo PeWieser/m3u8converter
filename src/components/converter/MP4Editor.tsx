@@ -290,8 +290,21 @@ export function MP4Editor() {
     if (selectedTmdb && selectedTmdb.type === 'tv') {
       const eps = await fetchSeasonEpisodes(selectedTmdb.id, parseInt(seasonNumber, 10));
       setEpisodes(eps);
+      
+      // Fetch season-specific cover
+      const seasonImages = await fetchSeasonImages(selectedTmdb.id, parseInt(seasonNumber, 10));
+      if (seasonImages.length > 0) {
+        const seasonPosterUrl = seasonImages[0].url;
+        const coverFileResult = await fetchCoverFromUrl(seasonPosterUrl);
+        if (coverFileResult) {
+          setCoverFile(coverFileResult);
+          setCoverPreview(seasonPosterUrl);
+          setCoverSource('url');
+          setCoverUrl(seasonPosterUrl);
+        }
+      }
     }
-  }, [selectedTmdb, fetchSeasonEpisodes]);
+  }, [selectedTmdb, fetchSeasonEpisodes, fetchSeasonImages, fetchCoverFromUrl]);
 
   const handleEpisodeChange = useCallback((episodeNumber: string) => {
     setMetadata(prev => ({ ...prev, episode: episodeNumber }));
