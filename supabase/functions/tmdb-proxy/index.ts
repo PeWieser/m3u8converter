@@ -259,7 +259,31 @@ serve(async (req) => {
           );
         }
         
-        url = `${TMDB_BASE_URL}/tv/${validId}/season/${validSeason}?api_key=${TMDB_API_KEY}&language=de-DE`;
+        url = `${TMDB_BASE_URL}/tv/${validId}/season/${validSeason}?api_key=${TMDB_API_KEY}&language=${tmdbLanguage}`;
+        break;
+      }
+
+      case 'season-images': {
+        const validId = validateNumericId(id);
+        const validSeason = validateSeasonNumber(seasonNumber);
+        
+        if (validId === null) {
+          return new Response(
+            JSON.stringify({ error: 'Invalid or missing id parameter' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        
+        if (validSeason === null) {
+          return new Response(
+            JSON.stringify({ error: 'Invalid or missing seasonNumber parameter' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        
+        // Extract language code (e.g., "de" from "de-DE") for image language filter
+        const imgLang = tmdbLanguage.split('-')[0];
+        url = `${TMDB_BASE_URL}/tv/${validId}/season/${validSeason}/images?api_key=${TMDB_API_KEY}&include_image_language=${imgLang},null`;
         break;
       }
 
