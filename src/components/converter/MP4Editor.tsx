@@ -68,9 +68,12 @@ export function MP4Editor() {
   const [overwriteOriginal, setOverwriteOriginal] = useState(false);
   const [outputFolder, setOutputFolder] = useState(() => localStorage.getItem('outputFolder') || 'converted');
   const [encodingSettings, setEncodingSettings] = useState<EncodingSettingsType>(loadEncodingSettings);
+  const [renameEnabled, setRenameEnabled] = useState(() => localStorage.getItem('renameEnabled') !== 'false');
+  const [moviePattern, setMoviePattern] = useState(() => localStorage.getItem('moviePattern') || '{title} ({year})');
+  const [tvPattern, setTvPattern] = useState(() => localStorage.getItem('tvPattern') || '{show} - S{season}E{episode} - {title} ({year})');
   
   const { load, loaded, loading: ffmpegLoading, progress, processing, readingProgress, editMetadata } = useFFmpegEditor();
-  const { results, loading: tmdbLoading, search, clearResults, fetchDetails, fetchSeasonEpisodes } = useTmdbSearch();
+  const { results, loading: tmdbLoading, search, clearResults, fetchDetails, fetchSeasonEpisodes, fetchSeasonImages, language, setLanguage } = useTmdbSearch();
   const localBridge = useLocalBridge();
 
   const [seasons, setSeasons] = useState<any[]>([]);
