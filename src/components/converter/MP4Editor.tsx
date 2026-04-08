@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Image, Download, Loader2, Trash2, Save, Film, Tv, User, Calendar, Tag, FileText, Link, Upload, Monitor, Globe, FileVideo, AlertTriangle, Languages, Settings2 } from 'lucide-react';
+import { CoverPicker } from './CoverPicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
