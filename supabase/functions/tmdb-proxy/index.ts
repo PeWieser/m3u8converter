@@ -213,7 +213,7 @@ serve(async (req) => {
           );
         }
         
-        url = `${TMDB_BASE_URL}/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(sanitizedQuery)}&language=de-DE&page=1`;
+        url = `${TMDB_BASE_URL}/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(sanitizedQuery)}&language=${tmdbLanguage}&page=1`;
         break;
       }
 
