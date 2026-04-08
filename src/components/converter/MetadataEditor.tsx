@@ -32,7 +32,7 @@ export function MetadataEditor({
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [selectedEpisode, setSelectedEpisode] = useState<number | null>(null);
   const [loadingEpisodes, setLoadingEpisodes] = useState(false);
-  const { results, loading, search, clearResults, fetchDetails, fetchSeasonEpisodes } = useTmdbSearch();
+  const { results, loading, search, clearResults, fetchDetails, fetchSeasonEpisodes, fetchSeasonImages } = useTmdbSearch();
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -107,6 +107,12 @@ export function MetadataEditor({
       const eps = await fetchSeasonEpisodes(selectedTmdb.id, season);
       setEpisodes(eps);
       setLoadingEpisodes(false);
+      
+      // Fetch season-specific cover
+      const seasonImages = await fetchSeasonImages(selectedTmdb.id, season);
+      if (seasonImages.length > 0) {
+        onChange({ thumbnail: seasonImages[0].url });
+      }
     }
   };
 

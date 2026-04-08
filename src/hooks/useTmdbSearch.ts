@@ -3,6 +3,23 @@ import { supabase } from '@/integrations/supabase/client';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
+export const TMDB_LANGUAGES = [
+  { code: 'de-DE', label: 'Deutsch' },
+  { code: 'en-US', label: 'English' },
+  { code: 'fr-FR', label: 'Français' },
+  { code: 'es-ES', label: 'Español' },
+  { code: 'it-IT', label: 'Italiano' },
+  { code: 'pt-BR', label: 'Português' },
+  { code: 'ja-JP', label: '日本語' },
+  { code: 'ko-KR', label: '한국어' },
+  { code: 'zh-CN', label: '中文' },
+  { code: 'ru-RU', label: 'Русский' },
+  { code: 'nl-NL', label: 'Nederlands' },
+  { code: 'pl-PL', label: 'Polski' },
+  { code: 'tr-TR', label: 'Türkçe' },
+  { code: 'sv-SE', label: 'Svenska' },
+];
+
 export interface TmdbResult {
   id: number;
   title: string;
@@ -46,10 +63,26 @@ export interface TmdbEpisode {
   still?: string;
 }
 
+export interface TmdbSeasonImage {
+  file_path: string;
+  width: number;
+  height: number;
+  iso_639_1?: string;
+  url: string;
+}
+
 export function useTmdbSearch() {
   const [results, setResults] = useState<TmdbResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [language, setLanguage] = useState<string>(() => 
+    localStorage.getItem('tmdb-language') || 'de-DE'
+  );
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  const updateLanguage = useCallback((lang: string) => {
+    setLanguage(lang);
+    localStorage.setItem('tmdb-language', lang);
+  }, []);
 
   const search = useCallback(async (query: string) => {
     if (debounceRef.current) {
@@ -65,14 +98,11 @@ export function useTmdbSearch() {
       setLoading(true);
       try {
         const { data, error } = await supabase.functions.invoke('tmdb-proxy', {
-          body: { action: 'search', query }
+          body: { action: 'search', query, language }
         });
         
-        if (error) {
-          throw new Error('TMDB API request failed');
-        }
+        if (error) throw new Error('TMDB API request failed');
         
-        // Filter for movies and TV shows only
         const items = (data.results || [])
           .filter((item: any) => item.media_type === 'movie' || item.media_type === 'tv')
           .slice(0, 8);
@@ -96,13 +126,12 @@ export function useTmdbSearch() {
         setLoading(false);
       }
     }, 300);
-  }, []);
+  }, [language]);
 
   const clearResults = useCallback(() => {
     setResults([]);
   }, []);
 
-  // Fetch image through our proxy to avoid CORS issues
   const fetchImageAsBlob = useCallback(async (imageUrl: string): Promise<Blob | null> => {
     if (!imageUrl) return null;
     
@@ -116,7 +145,6 @@ export function useTmdbSearch() {
         return null;
       }
       
-      // The response is already a blob if successful
       return data;
     } catch (error) {
       console.error('Image fetch error:', error);
@@ -129,14 +157,11 @@ export function useTmdbSearch() {
       const action = type === 'movie' ? 'movie-details' : 'tv-details';
       
       const { data: details, error } = await supabase.functions.invoke('tmdb-proxy', {
-        body: { action, id }
+        body: { action, id, language }
       });
       
-      if (error || !details) {
-        throw new Error('TMDB API request failed');
-      }
+      if (error || !details) throw new Error('TMDB API request failed');
       
-      // Extract director or creators from credits
       let director: string | undefined;
       let creators: string[] | undefined;
       
@@ -149,11 +174,10 @@ export function useTmdbSearch() {
         }
       }
 
-      // Extract seasons for TV shows
       let seasons: TmdbSeason[] | undefined;
       if (type === 'tv' && details.seasons) {
         seasons = details.seasons
-          .filter((s: any) => s.season_number > 0) // Exclude specials (season 0)
+          .filter((s: any) => s.season_number > 0)
           .map((s: any) => ({
             seasonNumber: s.season_number,
             name: s.name,
@@ -188,17 +212,15 @@ export function useTmdbSearch() {
       console.error('TMDB details error:', error);
       return null;
     }
-  }, []);
+  }, [language]);
 
   const fetchSeasonEpisodes = useCallback(async (tvId: number, seasonNumber: number): Promise<TmdbEpisode[]> => {
     try {
       const { data, error } = await supabase.functions.invoke('tmdb-proxy', {
-        body: { action: 'season-episodes', id: tvId, seasonNumber }
+        body: { action: 'season-episodes', id: tvId, seasonNumber, language }
       });
       
-      if (error || !data) {
-        throw new Error('TMDB API request failed');
-      }
+      if (error || !data) throw new Error('TMDB API request failed');
       
       return (data.episodes || []).map((ep: any) => ({
         episodeNumber: ep.episode_number,
@@ -211,15 +233,39 @@ export function useTmdbSearch() {
       console.error('TMDB episodes error:', error);
       return [];
     }
-  }, []);
+  }, [language]);
+
+  const fetchSeasonImages = useCallback(async (tvId: number, seasonNumber: number): Promise<TmdbSeasonImage[]> => {
+    try {
+      const { data, error } = await supabase.functions.invoke('tmdb-proxy', {
+        body: { action: 'season-images', id: tvId, seasonNumber, language }
+      });
+      
+      if (error || !data) throw new Error('TMDB API request failed');
+      
+      return (data.posters || []).map((img: any) => ({
+        file_path: img.file_path,
+        width: img.width,
+        height: img.height,
+        iso_639_1: img.iso_639_1,
+        url: `${TMDB_IMAGE_BASE}/w500${img.file_path}`,
+      }));
+    } catch (error) {
+      console.error('TMDB season images error:', error);
+      return [];
+    }
+  }, [language]);
 
   return {
     results,
     loading,
+    language,
+    setLanguage: updateLanguage,
     search,
     clearResults,
     fetchDetails,
     fetchSeasonEpisodes,
+    fetchSeasonImages,
     fetchImageAsBlob,
   };
 }

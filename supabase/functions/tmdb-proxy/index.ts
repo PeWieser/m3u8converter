@@ -98,7 +98,10 @@ serve(async (req) => {
       );
     }
 
-    const { action, query, id, type, seasonNumber, imageUrl } = body;
+    const { action, query, id, type, seasonNumber, imageUrl, language } = body;
+    
+    // Determine language for TMDB API calls (default: de-DE)
+    const tmdbLanguage = language && typeof language === 'string' ? language : 'de-DE';
 
     // Validate action parameter
     if (!action || typeof action !== 'string') {
@@ -108,7 +111,7 @@ serve(async (req) => {
       );
     }
 
-    const validActions = ['search', 'movie-details', 'tv-details', 'season-episodes', 'proxy-image'];
+    const validActions = ['search', 'movie-details', 'tv-details', 'season-episodes', 'season-images', 'proxy-image'];
     if (!validActions.includes(action)) {
       console.warn(`Invalid action attempted: ${action}`);
       return new Response(
@@ -210,7 +213,7 @@ serve(async (req) => {
           );
         }
         
-        url = `${TMDB_BASE_URL}/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(sanitizedQuery)}&language=de-DE&page=1`;
+        url = `${TMDB_BASE_URL}/search/multi?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(sanitizedQuery)}&language=${tmdbLanguage}&page=1`;
         break;
       }
 
@@ -222,7 +225,7 @@ serve(async (req) => {
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
-        url = `${TMDB_BASE_URL}/movie/${validId}?api_key=${TMDB_API_KEY}&language=de-DE&append_to_response=credits`;
+        url = `${TMDB_BASE_URL}/movie/${validId}?api_key=${TMDB_API_KEY}&language=${tmdbLanguage}&append_to_response=credits`;
         break;
       }
 
@@ -234,7 +237,7 @@ serve(async (req) => {
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
-        url = `${TMDB_BASE_URL}/tv/${validId}?api_key=${TMDB_API_KEY}&language=de-DE&append_to_response=credits`;
+        url = `${TMDB_BASE_URL}/tv/${validId}?api_key=${TMDB_API_KEY}&language=${tmdbLanguage}&append_to_response=credits`;
         break;
       }
 
@@ -256,7 +259,31 @@ serve(async (req) => {
           );
         }
         
-        url = `${TMDB_BASE_URL}/tv/${validId}/season/${validSeason}?api_key=${TMDB_API_KEY}&language=de-DE`;
+        url = `${TMDB_BASE_URL}/tv/${validId}/season/${validSeason}?api_key=${TMDB_API_KEY}&language=${tmdbLanguage}`;
+        break;
+      }
+
+      case 'season-images': {
+        const validId = validateNumericId(id);
+        const validSeason = validateSeasonNumber(seasonNumber);
+        
+        if (validId === null) {
+          return new Response(
+            JSON.stringify({ error: 'Invalid or missing id parameter' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        
+        if (validSeason === null) {
+          return new Response(
+            JSON.stringify({ error: 'Invalid or missing seasonNumber parameter' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        
+        // Extract language code (e.g., "de" from "de-DE") for image language filter
+        const imgLang = tmdbLanguage.split('-')[0];
+        url = `${TMDB_BASE_URL}/tv/${validId}/season/${validSeason}/images?api_key=${TMDB_API_KEY}&include_image_language=${imgLang},null`;
         break;
       }
 

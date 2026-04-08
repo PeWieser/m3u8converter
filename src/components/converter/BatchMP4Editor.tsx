@@ -370,14 +370,31 @@ export function BatchMP4Editor() {
     
     const eps = await tmdbHook.fetchSeasonEpisodes(file.selectedTmdb.id, parseInt(seasonNumber, 10));
     
+    // Fetch season-specific cover
+    const seasonImages = await tmdbHook.fetchSeasonImages(file.selectedTmdb.id, parseInt(seasonNumber, 10));
+    let coverFile: File | undefined;
+    let coverPreview: string | undefined;
+    let coverUrl: string | undefined;
+    
+    if (seasonImages.length > 0) {
+      const seasonPosterUrl = seasonImages[0].url;
+      const file2 = await fetchCoverFromUrl(seasonPosterUrl);
+      if (file2) {
+        coverFile = file2;
+        coverPreview = seasonPosterUrl;
+        coverUrl = seasonPosterUrl;
+      }
+    }
+    
     setFiles(prev => prev.map(f => 
       f.id === fileId ? { 
         ...f, 
         metadata: { ...f.metadata, season: seasonNumber },
         episodes: eps,
+        ...(coverFile ? { coverFile, coverPreview, coverUrl } : {}),
       } : f
     ));
-  }, [files, tmdbHook]);
+  }, [files, tmdbHook, fetchCoverFromUrl]);
 
   const handleEpisodeChange = useCallback((fileId: string, episodeNumber: string) => {
     const file = files.find(f => f.id === fileId);

@@ -1,13 +1,15 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Image, Download, Loader2, Trash2, Save, Film, Tv, User, Calendar, Tag, FileText, Link, Upload, Monitor, Globe, FileVideo, AlertTriangle } from 'lucide-react';
+import { Image, Download, Loader2, Trash2, Save, Film, Tv, User, Calendar, Tag, FileText, Link, Upload, Monitor, Globe, FileVideo, AlertTriangle, Languages, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
 import { useFFmpegEditor } from '@/hooks/useFFmpegEditor';
-import { useTmdbSearch, type TmdbResult } from '@/hooks/useTmdbSearch';
+import { useTmdbSearch, TMDB_LANGUAGES, type TmdbResult } from '@/hooks/useTmdbSearch';
 import type { ConversionMetadata } from '@/types/converter';
 import { supabase } from '@/integrations/supabase/client';
 import { MemorySettings } from './MemorySettings';
@@ -66,9 +68,12 @@ export function MP4Editor() {
   const [overwriteOriginal, setOverwriteOriginal] = useState(false);
   const [outputFolder, setOutputFolder] = useState(() => localStorage.getItem('outputFolder') || 'converted');
   const [encodingSettings, setEncodingSettings] = useState<EncodingSettingsType>(loadEncodingSettings);
+  const [renameEnabled, setRenameEnabled] = useState(() => localStorage.getItem('renameEnabled') !== 'false');
+  const [moviePattern, setMoviePattern] = useState(() => localStorage.getItem('moviePattern') || '{title} ({year})');
+  const [tvPattern, setTvPattern] = useState(() => localStorage.getItem('tvPattern') || '{show} - S{season}E{episode} - {title} ({year})');
   
   const { load, loaded, loading: ffmpegLoading, progress, processing, readingProgress, editMetadata } = useFFmpegEditor();
-  const { results, loading: tmdbLoading, search, clearResults, fetchDetails, fetchSeasonEpisodes } = useTmdbSearch();
+  const { results, loading: tmdbLoading, search, clearResults, fetchDetails, fetchSeasonEpisodes, fetchSeasonImages, language, setLanguage } = useTmdbSearch();
   const localBridge = useLocalBridge();
 
   const [seasons, setSeasons] = useState<any[]>([]);
@@ -285,8 +290,21 @@ export function MP4Editor() {
     if (selectedTmdb && selectedTmdb.type === 'tv') {
       const eps = await fetchSeasonEpisodes(selectedTmdb.id, parseInt(seasonNumber, 10));
       setEpisodes(eps);
+      
+      // Fetch season-specific cover
+      const seasonImages = await fetchSeasonImages(selectedTmdb.id, parseInt(seasonNumber, 10));
+      if (seasonImages.length > 0) {
+        const seasonPosterUrl = seasonImages[0].url;
+        const coverFileResult = await fetchCoverFromUrl(seasonPosterUrl);
+        if (coverFileResult) {
+          setCoverFile(coverFileResult);
+          setCoverPreview(seasonPosterUrl);
+          setCoverSource('url');
+          setCoverUrl(seasonPosterUrl);
+        }
+      }
     }
-  }, [selectedTmdb, fetchSeasonEpisodes]);
+  }, [selectedTmdb, fetchSeasonEpisodes, fetchSeasonImages, fetchCoverFromUrl]);
 
   const handleEpisodeChange = useCallback((episodeNumber: string) => {
     setMetadata(prev => ({ ...prev, episode: episodeNumber }));
@@ -406,15 +424,32 @@ export function MP4Editor() {
     }
   }, [videoFile, metadata, coverFile, loaded, load, editMetadata, memorySettings, processingMode, localBridge, localFilePath, overwriteOriginal]);
 
+  // Build filename from pattern
+  const buildFilename = useCallback((meta: ConversionMetadata, pattern: string) => {
+    return pattern
+      .replace(/{title}/g, meta.title || 'output')
+      .replace(/{show}/g, meta.show || '')
+      .replace(/{season}/g, (meta.season || '0').padStart(2, '0'))
+      .replace(/{episode}/g, (meta.episode || '0').padStart(2, '0'))
+      .replace(/{year}/g, meta.date || '')
+      .replace(/{genre}/g, meta.genre || '')
+      .replace(/{director}/g, meta.director || meta.author || '')
+      .replace(/\s+/g, ' ')
+      .replace(/\(\s*\)/g, '') // remove empty parens
+      .replace(/\s*-\s*-\s*/g, ' - ') // clean double dashes
+      .trim();
+  }, []);
+
   const handleDownload = useCallback(() => {
     if (!outputBlob) return;
     
-    // Dateiname: Für Serien "Show - S01E01 - Episodenname", für Filme nur Titel
-    let filename = metadata.title || 'output';
-    if (metadata.show && metadata.season && metadata.episode) {
-      const seasonPadded = metadata.season.padStart(2, '0');
-      const episodePadded = metadata.episode.padStart(2, '0');
-      filename = `${metadata.show} - S${seasonPadded}E${episodePadded} - ${metadata.title}`;
+    let filename: string;
+    if (renameEnabled) {
+      const isTV = !!(metadata.show && metadata.season && metadata.episode);
+      const pattern = isTV ? tvPattern : moviePattern;
+      filename = buildFilename(metadata, pattern);
+    } else {
+      filename = metadata.title || 'output';
     }
     
     const url = URL.createObjectURL(outputBlob);
@@ -423,7 +458,7 @@ export function MP4Editor() {
     a.download = `${filename}.mp4`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [outputBlob, metadata]);
+  }, [outputBlob, metadata, renameEnabled, moviePattern, tvPattern, buildFilename]);
 
   const handleReset = useCallback(() => {
     setVideoFile(null);
@@ -594,10 +629,25 @@ export function MP4Editor() {
 
           {/* Metadata Editor */}
           <div className="glass rounded-xl p-6 space-y-4">
-            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <FileText className="h-5 w-5 text-primary" />
-              Metadaten
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <FileText className="h-5 w-5 text-primary" />
+                Metadaten
+              </h3>
+              <div className="flex items-center gap-2">
+                <Languages className="h-4 w-4 text-muted-foreground" />
+                <Select value={language} onValueChange={setLanguage}>
+                  <SelectTrigger className="w-[140px] h-8 text-xs bg-secondary/50 border-border/50">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TMDB_LANGUAGES.map(l => (
+                      <SelectItem key={l.code} value={l.code}>{l.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
 
             {/* Title with TMDB Search */}
             <div className="space-y-2 relative">
@@ -767,7 +817,63 @@ export function MP4Editor() {
             </div>
           </div>
 
-          {/* Overwrite Option - Only for local processing */}
+          {/* Filename Renaming Settings */}
+          <div className="glass rounded-xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <Settings2 className="h-4 w-4 text-primary" />
+                Dateiname automatisch umbenennen
+              </h3>
+              <Switch
+                checked={renameEnabled}
+                onCheckedChange={(v) => {
+                  setRenameEnabled(v);
+                  localStorage.setItem('renameEnabled', String(v));
+                }}
+              />
+            </div>
+            
+            {renameEnabled && (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Film-Schema</Label>
+                  <Input
+                    value={moviePattern}
+                    onChange={(e) => {
+                      setMoviePattern(e.target.value);
+                      localStorage.setItem('moviePattern', e.target.value);
+                    }}
+                    placeholder="{title} ({year})"
+                    className="bg-secondary/50 border-border/50 h-8 text-sm font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Serien-Schema</Label>
+                  <Input
+                    value={tvPattern}
+                    onChange={(e) => {
+                      setTvPattern(e.target.value);
+                      localStorage.setItem('tvPattern', e.target.value);
+                    }}
+                    placeholder="{show} - S{season}E{episode} - {title} ({year})"
+                    className="bg-secondary/50 border-border/50 h-8 text-sm font-mono"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Platzhalter: <code className="text-primary">{'{title}'}</code> <code className="text-primary">{'{show}'}</code> <code className="text-primary">{'{season}'}</code> <code className="text-primary">{'{episode}'}</code> <code className="text-primary">{'{year}'}</code> <code className="text-primary">{'{genre}'}</code> <code className="text-primary">{'{director}'}</code>
+                </p>
+                {/* Preview */}
+                <div className="rounded-lg bg-secondary/30 p-2">
+                  <span className="text-xs text-muted-foreground">Vorschau: </span>
+                  <span className="text-xs font-medium">
+                    {buildFilename(metadata, (metadata.show && metadata.season && metadata.episode) ? tvPattern : moviePattern)}.mp4
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+
           {processingMode === 'local' && localBridge.connected && (
             <div className="glass rounded-xl p-4 space-y-4">
               <label className="flex items-center gap-3 cursor-pointer">
