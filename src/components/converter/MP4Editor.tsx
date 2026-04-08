@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Image, Download, Loader2, Trash2, Save, Film, Tv, User, Calendar, Tag, FileText, Link, Upload, Monitor, Globe, FileVideo, AlertTriangle, Languages, Settings2 } from 'lucide-react';
+import { CoverPicker } from './CoverPicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -548,7 +549,7 @@ export function MP4Editor() {
             </h3>
             
             {/* Source Toggle */}
-            <div className="flex gap-2 mb-4">
+            <div className="flex gap-2 mb-4 flex-wrap">
               <Button
                 variant={coverSource === 'file' ? 'default' : 'outline'}
                 size="sm"
@@ -565,6 +566,20 @@ export function MP4Editor() {
                 <Link className="h-4 w-4 mr-2" />
                 URL
               </Button>
+              <CoverPicker
+                tmdbId={selectedTmdb?.id || null}
+                tmdbType={selectedTmdb?.type || null}
+                seasons={seasons}
+                mainPoster={selectedTmdb?.poster}
+                language={language}
+                onSelect={async (url) => {
+                  setCoverUrl(url);
+                  setCoverPreview(url);
+                  setCoverSource('url');
+                  const file = await fetchCoverFromUrl(url);
+                  if (file) setCoverFile(file);
+                }}
+              />
             </div>
             
             <div className="flex gap-4">
