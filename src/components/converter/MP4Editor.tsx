@@ -424,15 +424,32 @@ export function MP4Editor() {
     }
   }, [videoFile, metadata, coverFile, loaded, load, editMetadata, memorySettings, processingMode, localBridge, localFilePath, overwriteOriginal]);
 
+  // Build filename from pattern
+  const buildFilename = useCallback((meta: ConversionMetadata, pattern: string) => {
+    return pattern
+      .replace(/{title}/g, meta.title || 'output')
+      .replace(/{show}/g, meta.show || '')
+      .replace(/{season}/g, (meta.season || '0').padStart(2, '0'))
+      .replace(/{episode}/g, (meta.episode || '0').padStart(2, '0'))
+      .replace(/{year}/g, meta.date || '')
+      .replace(/{genre}/g, meta.genre || '')
+      .replace(/{director}/g, meta.director || meta.author || '')
+      .replace(/\s+/g, ' ')
+      .replace(/\(\s*\)/g, '') // remove empty parens
+      .replace(/\s*-\s*-\s*/g, ' - ') // clean double dashes
+      .trim();
+  }, []);
+
   const handleDownload = useCallback(() => {
     if (!outputBlob) return;
     
-    // Dateiname: Für Serien "Show - S01E01 - Episodenname", für Filme nur Titel
-    let filename = metadata.title || 'output';
-    if (metadata.show && metadata.season && metadata.episode) {
-      const seasonPadded = metadata.season.padStart(2, '0');
-      const episodePadded = metadata.episode.padStart(2, '0');
-      filename = `${metadata.show} - S${seasonPadded}E${episodePadded} - ${metadata.title}`;
+    let filename: string;
+    if (renameEnabled) {
+      const isTV = !!(metadata.show && metadata.season && metadata.episode);
+      const pattern = isTV ? tvPattern : moviePattern;
+      filename = buildFilename(metadata, pattern);
+    } else {
+      filename = metadata.title || 'output';
     }
     
     const url = URL.createObjectURL(outputBlob);
@@ -441,7 +458,7 @@ export function MP4Editor() {
     a.download = `${filename}.mp4`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [outputBlob, metadata]);
+  }, [outputBlob, metadata, renameEnabled, moviePattern, tvPattern, buildFilename]);
 
   const handleReset = useCallback(() => {
     setVideoFile(null);
