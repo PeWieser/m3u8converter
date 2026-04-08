@@ -1,13 +1,15 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Image, Download, Loader2, Trash2, Save, Film, Tv, User, Calendar, Tag, FileText, Link, Upload, Monitor, Globe, FileVideo, AlertTriangle } from 'lucide-react';
+import { Image, Download, Loader2, Trash2, Save, Film, Tv, User, Calendar, Tag, FileText, Link, Upload, Monitor, Globe, FileVideo, AlertTriangle, Languages, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
 import { useFFmpegEditor } from '@/hooks/useFFmpegEditor';
-import { useTmdbSearch, type TmdbResult } from '@/hooks/useTmdbSearch';
+import { useTmdbSearch, TMDB_LANGUAGES, type TmdbResult } from '@/hooks/useTmdbSearch';
 import type { ConversionMetadata } from '@/types/converter';
 import { supabase } from '@/integrations/supabase/client';
 import { MemorySettings } from './MemorySettings';
