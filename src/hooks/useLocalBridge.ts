@@ -27,6 +27,7 @@ export interface LocalBridgeState {
 
 export interface LocalBridgeStartPayload {
   path: string;
+  filename: string;
   title: string;
   show: string;
   season: string;
@@ -279,6 +280,7 @@ export const useLocalBridge = () => {
     coverFile?: File,
     overwrite: boolean = false,
     outputFolder: string = 'converted',
+    filename?: string,
   ): Promise<{ success: boolean; error?: string }> => {
     if (!state.connected) {
       return { success: false, error: 'Nicht mit PC-Modul verbunden' };
@@ -311,6 +313,7 @@ export const useLocalBridge = () => {
 
       const payload: LocalBridgeStartPayload = {
         path: filePath,
+        filename: filename || filePath.split(/[/\\]/).pop()?.replace(/\.[^/.]+$/, '') || 'output',
         title: metadata.title || '',
         show: metadata.show || '',
         season: metadata.season || '',
