@@ -412,13 +412,21 @@ export function MP4Editor() {
         description: metadata.description,
       };
       
-      // Pass overwrite flag to local conversion
+      // Build filename from rename pattern
+      let filename: string | undefined;
+      if (renameEnabled) {
+        const pattern = metadata.show ? tvPattern : moviePattern;
+        filename = buildFilename(metadata, pattern);
+      }
+      
+      // Pass overwrite flag and filename to local conversion
       const result = await localBridge.startConversion(
         localFilePath, 
         bridgeMetadata, 
         coverFile || undefined,
         overwriteOriginal,
-        outputFolder
+        outputFolder,
+        filename
       );
       
       if (result.success) {
