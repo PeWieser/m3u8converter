@@ -382,6 +382,51 @@ export const useLocalBridge = () => {
     });
   }, [state.connected, updateState]);
 
+  const fetchMetadata = useCallback(async (path: string): Promise<LocalBridgeMetadata | null> => {
+    if (!state.connected) return null;
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const response = await fetch(`${API_BASE}/get-metadata`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        console.warn('Metadata fetch failed:', response.status);
+        return null;
+      }
+
+      const data = await response.json();
+      if (data.error) {
+        console.warn('Metadata error:', data.error);
+        return null;
+      }
+
+      addGlobalLog('info', `Metadaten ausgelesen: ${path.split(/[/\\]/).pop()}`, 'PC-Modul');
+
+      return {
+        title: data.title || '',
+        show: data.show || '',
+        season: data.season || '',
+        episode: data.episode || '',
+        artist: data.artist || '',
+        year: data.year || '',
+        genre: data.genre || '',
+        description: data.description || '',
+      };
+    } catch (err) {
+      console.warn('Failed to fetch metadata:', err);
+      return null;
+    }
+  }, [state.connected]);
+
   const openModule = useCallback(() => {
     window.location.href = 'my-converter://';
   }, []);
@@ -410,6 +455,7 @@ export const useLocalBridge = () => {
     startConversion,
     clearFile,
     setFilePath,
+    fetchMetadata,
     openModule,
   };
 };
