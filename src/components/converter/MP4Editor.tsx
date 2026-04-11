@@ -260,7 +260,20 @@ export function MP4Editor() {
     setRecommendation(null);
     setFormatInfo(null);
     setProcessingMode('browser');
-  }, []);
+    setCoverFile(null);
+    setCoverPreview(null);
+    setCoverUrl('');
+    setSelectedTmdb(null);
+    setSeasons([]);
+    setEpisodes([]);
+    setOutputBlob(null);
+    clearResults();
+    setShowTmdbDropdown(false);
+    setMetadata({
+      title: '', author: '', show: '', season: '', episode: '',
+      date: '', director: '', genre: '', description: '',
+    });
+  }, [clearResults]);
 
   const handleCoverSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
