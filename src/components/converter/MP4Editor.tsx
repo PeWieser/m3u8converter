@@ -179,7 +179,8 @@ export function MP4Editor() {
   }, [search, localBridge.connected]);
 
   // Handle local file selection from SmartFilePicker
-  const handleLocalFileSelect = useCallback((path: string) => {
+  const handleLocalFileSelect = useCallback(async (path: string) => {
+    // Clear all old state first
     setVideoFile(null);
     setLocalFilePath(path);
     setProcessingMode('local');
@@ -191,25 +192,66 @@ export function MP4Editor() {
       showBridgePrompt: false,
     });
     setFormatInfo(null);
-    
-    const baseTitle = path.split(/[/\\]/).pop()?.replace(/\.[^/.]+$/, '') || '';
-    setMetadata(prev => ({
-      ...prev,
-      title: baseTitle,
-    }));
     setOutputBlob(null);
+    setCoverFile(null);
+    setCoverPreview(null);
+    setCoverUrl('');
+    setSelectedTmdb(null);
+    setSeasons([]);
+    setEpisodes([]);
+    clearResults();
+    setShowTmdbDropdown(false);
     
-    // Automatisch TMDB-Suche starten basierend auf Dateinamen
-    if (baseTitle.length >= 2) {
-      search(baseTitle);
-      setShowTmdbDropdown(true);
+    const fileName = path.split(/[/\\]/).pop() || '';
+    const baseTitle = fileName.replace(/\.[^/.]+$/, '');
+    
+    // Reset metadata first with filename
+    setMetadata({
+      title: baseTitle,
+      author: '',
+      show: '',
+      season: '',
+      episode: '',
+      date: '',
+      director: '',
+      genre: '',
+      description: '',
+    });
+    
+    // Fetch metadata from local bridge
+    const meta = await localBridge.fetchMetadata(path);
+    if (meta) {
+      setMetadata(prev => ({
+        ...prev,
+        title: meta.title || prev.title,
+        author: meta.artist || '',
+        show: meta.show || '',
+        season: meta.season || '',
+        episode: meta.episode || '',
+        date: meta.year || '',
+        genre: meta.genre || '',
+        description: meta.description || '',
+      }));
+      
+      // Use fetched title or show name for TMDB search
+      const searchTerm = meta.show || meta.title || baseTitle;
+      if (searchTerm.length >= 2) {
+        search(searchTerm);
+        setShowTmdbDropdown(true);
+      }
+    } else {
+      // Fallback: search by filename
+      if (baseTitle.length >= 2) {
+        search(baseTitle);
+        setShowTmdbDropdown(true);
+      }
     }
     
     toast({
       title: 'Lokale Datei ausgewählt',
-      description: baseTitle,
+      description: fileName,
     });
-  }, [search]);
+  }, [search, localBridge, clearResults]);
 
   // Clear file selection
   const handleClearFile = useCallback(() => {
