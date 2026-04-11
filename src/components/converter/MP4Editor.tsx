@@ -397,6 +397,22 @@ export function MP4Editor() {
     }
   }, [fetchCoverFromUrl]);
 
+  // Build filename from pattern
+  const buildFilename = useCallback((meta: ConversionMetadata, pattern: string) => {
+    return pattern
+      .replace(/{title}/g, meta.title || 'output')
+      .replace(/{show}/g, meta.show || '')
+      .replace(/{season}/g, (meta.season || '0').padStart(2, '0'))
+      .replace(/{episode}/g, (meta.episode || '0').padStart(2, '0'))
+      .replace(/{year}/g, meta.date || '')
+      .replace(/{genre}/g, meta.genre || '')
+      .replace(/{director}/g, meta.director || meta.author || '')
+      .replace(/\s+/g, ' ')
+      .replace(/\(\s*\)/g, '')
+      .replace(/\s*-\s*-\s*/g, ' - ')
+      .trim();
+  }, []);
+
   const handleProcess = useCallback(async () => {
     // Local processing via bridge
     if (processingMode === 'local' && localBridge.connected && localFilePath) {
@@ -488,21 +504,8 @@ export function MP4Editor() {
     }
   }, [videoFile, metadata, coverFile, loaded, load, editMetadata, memorySettings, processingMode, localBridge, localFilePath, overwriteOriginal]);
 
-  // Build filename from pattern
-  const buildFilename = useCallback((meta: ConversionMetadata, pattern: string) => {
-    return pattern
-      .replace(/{title}/g, meta.title || 'output')
-      .replace(/{show}/g, meta.show || '')
-      .replace(/{season}/g, (meta.season || '0').padStart(2, '0'))
-      .replace(/{episode}/g, (meta.episode || '0').padStart(2, '0'))
-      .replace(/{year}/g, meta.date || '')
-      .replace(/{genre}/g, meta.genre || '')
-      .replace(/{director}/g, meta.director || meta.author || '')
-      .replace(/\s+/g, ' ')
-      .replace(/\(\s*\)/g, '') // remove empty parens
-      .replace(/\s*-\s*-\s*/g, ' - ') // clean double dashes
-      .trim();
-  }, []);
+
+
 
   const handleDownload = useCallback(() => {
     if (!outputBlob) return;
