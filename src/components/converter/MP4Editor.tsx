@@ -502,7 +502,7 @@ export function MP4Editor() {
         variant: 'destructive',
       });
     }
-  }, [videoFile, metadata, coverFile, loaded, load, editMetadata, memorySettings, processingMode, localBridge, localFilePath, overwriteOriginal]);
+  }, [videoFile, metadata, coverFile, loaded, load, editMetadata, memorySettings, processingMode, localBridge, localFilePath, overwriteOriginal, outputFolder, renameEnabled, moviePattern, tvPattern, buildFilename, encodingSettings]);
 
 
 
