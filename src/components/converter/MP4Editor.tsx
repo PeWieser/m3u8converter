@@ -363,19 +363,14 @@ export function MP4Editor() {
   }, [selectedTmdb, fetchSeasonEpisodes, fetchSeasonImages, fetchCoverFromUrl]);
 
   const handleEpisodeChange = useCallback((episodeNumber: string) => {
-    setMetadata(prev => ({ ...prev, episode: episodeNumber }));
-    
     const ep = episodes.find(e => e.episodeNumber === parseInt(episodeNumber, 10));
-    if (ep) {
-      setMetadata(prev => ({
-        ...prev,
-        episode: episodeNumber,
-        // Metadaten-Titel ist nur der Episodenname, Dateiname enthält volles Format
-        title: ep.name,
-        description: ep.overview || prev.description,
-      }));
-    }
-  }, [episodes, selectedTmdb]);
+    setMetadata(prev => ({
+      ...prev,
+      episode: episodeNumber,
+      // Metadaten-Titel ist nur der Episodenname, Dateiname enthält volles Format
+      ...(ep ? { title: ep.name, description: ep.overview || prev.description } : {}),
+    }));
+  }, [episodes]);
 
   // Handle cover URL input
   const handleCoverUrlChange = useCallback(async (url: string) => {
